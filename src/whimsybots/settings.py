@@ -12,6 +12,9 @@ ALLOWED_HOSTS = ["127.0.0.1", "0.0.0.0", "localhost"]
 # Application definition
 
 INSTALLED_APPS = [
+    "app",
+    "user",
+
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -102,3 +105,6 @@ STATICFILES_DIRS = [
 ]
 STATIC_ROOT = os.path.join(BASE_DIR, "static")
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+LOGIN_URL = "/admin/login/"
+AUTH_USER_MODEL = "user.User"
