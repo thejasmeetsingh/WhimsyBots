@@ -2,6 +2,7 @@
 
 import django.utils.timezone
 import user.models
+import user.validators
 import uuid
 from django.db import migrations, models
 
@@ -82,7 +83,14 @@ class Migration(migrations.Migration):
                     "email",
                     models.EmailField(db_index=True, max_length=254, unique=True),
                 ),
-                ("mobile_number", models.CharField(max_length=12, unique=True)),
+                (
+                    "mobile_number",
+                    models.CharField(
+                        max_length=16,
+                        unique=True,
+                        validators=[user.validators.validate_mobile_number],
+                    ),
+                ),
                 (
                     "groups",
                     models.ManyToManyField(
