@@ -15,6 +15,8 @@ INSTALLED_APPS = [
     "app",
     "user",
 
+    "martor",
+
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -108,3 +110,19 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 LOGIN_URL = "/admin/login/"
 AUTH_USER_MODEL = "user.User"
+
+
+# Martor Config
+
+MARTOR_THEME = "semantic"
+MARTOR_ENABLE_CONFIGS = {
+    "emoji": "true",
+    "imgur": "false",
+    "mention": "false",
+    "jquery": "true",
+    "living": "true",
+    "spellcheck": "false",
+    "hljs": "true",
+}
+
+CSRF_COOKIE_HTTPONLY = False
