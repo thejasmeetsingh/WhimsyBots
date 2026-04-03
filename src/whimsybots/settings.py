@@ -1,5 +1,9 @@
 import os
+import logging.config
 from pathlib import Path
+
+from django.utils.log import DEFAULT_LOGGING
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -126,3 +130,38 @@ MARTOR_ENABLE_CONFIGS = {
 }
 
 CSRF_COOKIE_HTTPONLY = False
+
+
+# Logging Config
+
+LOGGING_CONFIG = None
+logging.config.dictConfig({
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+            "format": "%(asctime)s - %(module)s.%(funcName)s - %(name)s - %(levelname)s - %(message)s - %(exc_text)s"
+        },
+        "django.server": DEFAULT_LOGGING["formatters"]["django.server"],
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "default",
+        },
+        "django.server": DEFAULT_LOGGING["handlers"]["django.server"],
+    },
+    "loggers": {
+        "": {
+            "level": "INFO",
+            "handlers": ["console"],
+        },
+        "django.db.backends": {
+            "level": "INFO",
+            "handlers": ["console"],
+            "propagate": False
+        },
+        "django.server": DEFAULT_LOGGING["loggers"]["django.server"],
+    },
+})

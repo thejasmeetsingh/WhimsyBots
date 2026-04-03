@@ -23,6 +23,7 @@ phonenumbers==9.0.27
 prompt_toolkit==3.0.52
 psycopg2-binary==2.9.11
 python-dateutil==2.9.0.post0
+python-json-logger==4.1.0
 redis==6.4.0
 requests==2.33.1
 s3transfer==0.16.0
