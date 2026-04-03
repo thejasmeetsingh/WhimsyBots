@@ -9,6 +9,9 @@ help:
 	@echo "  make up                 - Start all services (detached)"
 	@echo "  make down               - Stop all services"
 	@echo "  make restart            - Restart all services"
+	@echo "  make restart-app        - Restart app container"
+	@echo "  make restart-celery     - Restart celery worker container"
+	@echo "  make restart-beat       - Restart celery beat container"
 	@echo "  make stop               - Stop services without removing containers"
 	@echo "  make start              - Start stopped services"
 	@echo "  make ps                 - Show running containers"
@@ -50,6 +53,15 @@ down:
 	cd src && docker-compose down
 
 restart: down up
+
+restart-app:
+	cd src && docker-compose restart app
+
+restart-celery:
+	cd src && docker-compose restart celery
+
+restart-beat:
+	cd src && docker-compose restart celery_beat
 
 stop:
 	cd src && docker-compose stop
