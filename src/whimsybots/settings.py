@@ -118,16 +118,22 @@ AUTH_USER_MODEL = "user.User"
 
 # Martor Config
 
-MARTOR_THEME = "semantic"
+MARTOR_THEME = "bootstrap"
 MARTOR_ENABLE_CONFIGS = {
     "emoji": "true",
     "imgur": "false",
     "mention": "false",
     "jquery": "true",
-    "living": "true",
+    "living": "false",
     "spellcheck": "false",
     "hljs": "true",
 }
+
+MARTOR_TOOLBAR_BUTTONS = [
+    "bold", "italic", "horizontal", "heading", "pre-code",
+    "blockquote", "unordered-list", "ordered-list",
+    "emoji", "toggle-maximize", "help"
+]
 
 CSRF_COOKIE_HTTPONLY = False
 
