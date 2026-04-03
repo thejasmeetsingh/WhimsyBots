@@ -59,7 +59,7 @@ class MCPServerAdmin(admin.ModelAdmin):
                 "secrets",
                 "is_active",
                 "created_at"
-            )})
+            )}),
         )
 
 
@@ -82,7 +82,7 @@ class MessageAdmin(admin.ModelAdmin):
                 "status",
                 "is_report_request",
                 "created_at"
-            )})
+            )}),
         )
 
     def has_add_permission(self, request):
@@ -113,7 +113,7 @@ class AppRunLogAdmin(admin.ModelAdmin):
                 "error",
                 "messages_sent",
                 "created_at"
-            )})
+            )}),
         )
     
     def has_add_permission(self, request):
