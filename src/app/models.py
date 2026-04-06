@@ -62,9 +62,10 @@ class MCPServer(BaseModel):
     app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="mcp_servers")
     name = models.CharField(max_length=100)
     transport = models.CharField(max_length=1, choices=MCPTransportType.get_values())
-    command = models.CharField(max_length=10, null=True, blank=True)
-    args = ArrayField(base_field=models.CharField(max_length=500), default=list, null=True, blank=True)
-    secrets = models.JSONField(default=dict)
+    command = models.CharField(max_length=10, null=True, blank=True, help_text="Command to run (python, npx, uv)")
+    endpoint = models.URLField(null=True, blank=True, validators=[URLValidator(schemes=["https"])], help_text="Remote MCP server endpoint URL")
+    args = ArrayField(base_field=models.CharField(max_length=500), default=list, null=True, blank=True, help_text="Command arguments as array (e.g., ['-y', '@modelcontextprotocol/server-memory'])")
+    secrets = models.JSONField(default=dict, help_text="Environment variables for local MCP server or HTTP headers for remote")
     is_active = models.BooleanField(default=True)
 
     class Meta:
