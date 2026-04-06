@@ -122,10 +122,10 @@ test:
 
 # Service Commands
 app-shell:
-	cd src && docker-compose exec app /bin/bash
+	cd src && docker-compose exec app /bin/sh
 
 celery-shell:
-	cd src && docker-compose exec celery /bin/bash
+	cd src && docker-compose exec celery /bin/sh
 
 # Cleanup
 clean:

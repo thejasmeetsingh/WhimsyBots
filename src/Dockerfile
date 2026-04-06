@@ -29,9 +29,6 @@ RUN apk add --no-cache \
 # Copy Python dependencies from builder
 COPY --from=builder /root/.local /root/.local
 
-# Install uv
-RUN /root/.local/bin/pip install --no-cache-dir uv
-
 # Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
 
