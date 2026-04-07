@@ -7,11 +7,13 @@ from app.models import (
     Message,
     AppRunLog
 )
+from app.forms import OllamaForm
 
 
 @admin.register(Ollama)
 class OllamaAdmin(admin.ModelAdmin):
     list_display = ("default_model",)
+    form = OllamaForm
 
     def has_add_permission(self, request):
         return Ollama.objects.count() == 0
