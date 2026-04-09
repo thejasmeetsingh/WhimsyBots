@@ -20,7 +20,8 @@ class BaseModel(models.Model):
 
 class Ollama(BaseModel):
     endpoint = models.URLField(default="http://localhost:11434", validators=[URLValidator(schemes=["http", "https"])])
-    default_model = models.CharField(max_length=50)
+    default_model = models.CharField(max_length=50, null=True, blank=True)
+    api_key = models.CharField(max_length=100, null=True, blank=True)
     temperature = models.FloatField(default=0.7, help_text="Controls randomness in generation (higher = more random)")
     num_ctx = models.PositiveIntegerField(default=4096, help_text="Context length size (number of tokens)")
     num_predict = models.IntegerField(default=-1, help_text="Maximum number of tokens to generate (-1 = infinite)")
