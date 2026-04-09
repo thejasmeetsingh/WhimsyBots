@@ -7,7 +7,7 @@ from app.models import (
     Message,
     AppRunLog
 )
-from app.forms import OllamaForm
+from app.forms import OllamaForm, AppForm
 
 
 @admin.register(Ollama)
@@ -21,6 +21,7 @@ class OllamaAdmin(admin.ModelAdmin):
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
+    form = AppForm
     list_display = ("name", "created_by", "is_active")
     search_fields = ("name", "created_by__email", "created_by__first_name")
     list_filter = ("is_active", "sms_enabled", "email_enabled")
@@ -37,6 +38,11 @@ class AppAdmin(admin.ModelAdmin):
             ("System Prompt", {"fields": ("system_prompt",)}),
             ("Communication", {"fields": ("sms_enabled", "email_enabled")})
         )
+    
+    def save_model(self, request, obj, form, change):
+        obj.created_by = request.user
+        return super().save_model(request, obj, form, change)
+
 
 
 @admin.register(MCPServer)
