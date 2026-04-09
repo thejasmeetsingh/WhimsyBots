@@ -15,13 +15,6 @@ class OllamaClient:
         endpoint = endpoint.strip("/").replace("localhost", "host.docker.internal")
         return endpoint
 
-    def update_endpoint(self, endpoint: str):
-        _endpoint = self._get_clean_endpoint(endpoint)
-        self._client = ollama.Client(host=_endpoint)
-
-    def update_model(self, model: str):
-        self._model = model
-
     def list_models(self):
         response = self._client.list()
         models = list(map(lambda x: {"name": x.name, "model": x.model}, response.models))
