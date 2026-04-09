@@ -4,9 +4,10 @@ import ollama
 class OllamaClient:
     _client = None
 
-    def __init__(self, endpoint=None):
+    def __init__(self, endpoint=None, api_key=None):
         _endpoint = self._get_clean_endpoint(endpoint or "http://localhost:11434")
-        self._client = ollama.Client(host=_endpoint)
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+        self._client = ollama.Client(host=_endpoint, headers=headers)
 
     @staticmethod
     def _get_clean_endpoint(endpoint: str):
