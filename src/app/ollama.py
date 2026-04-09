@@ -16,7 +16,7 @@ class OllamaClient:
 
     def list_models(self):
         response = self._client.list()
-        models = list(map(lambda x: {"name": x.name, "model": x.model}, response.models))
+        models = list(map(lambda x: x.model, response.models))
         return models
 
     def chat(self, model, messages, tools=None, format=None, options=None):
