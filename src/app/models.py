@@ -2,10 +2,11 @@ import uuid
 
 from django.db import models
 from django.contrib.postgres.fields import ArrayField
-from django.core.validators import URLValidator
+from django.core.validators import URLValidator, MinValueValidator
 from martor.models import MartorField
 
 from user.models import User
+from app.validators import validate_cron_expression, check_scheduling_fields, validate_transport_fields
 from app.choices import MCPTransportType, MessageChannel, MessageRole, MessageStatus
 
 
@@ -38,8 +39,10 @@ class App(BaseModel):
     is_active = models.BooleanField(default=True)
 
     # Scheduling
-    interval_mins = models.PositiveIntegerField(null=True, blank=True, help_text="Runs every X minutes")
-    cron_expressions = models.CharField(max_length=100, null=True, blank=True, help_text="Scheduling in cron format")
+    interval_mins = models.PositiveIntegerField(null=True, blank=True, help_text="Runs every X minutes",
+                                                validators=[MinValueValidator(5)])
+    cron_expression = models.CharField(max_length=100, null=True, blank=True, help_text="Scheduling in cron format",
+                                       validators=[validate_cron_expression])
     next_run_at = models.DateTimeField(null=True, blank=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
 
@@ -48,12 +51,17 @@ class App(BaseModel):
     system_prompt = MartorField(null=True, blank=True)
 
     # Communication
-    sms_enabled = models.BooleanField(default=True, help_text="Main interface for communication")
+    sms_enabled = models.BooleanField(default=True, verbose_name="SMS enabled",
+                                      help_text="Main interface for communication")
     email_enabled = models.BooleanField(default=False, help_text="For sending reports only")
 
     class Meta:
         verbose_name = "App"
         verbose_name_plural = "Apps"
+
+    def clean(self):
+        check_scheduling_fields(self.interval_mins, self.cron_expression)
+        return super().clean()
 
     def __str__(self):
         return self.name
@@ -65,13 +73,19 @@ class MCPServer(BaseModel):
     transport = models.CharField(max_length=1, choices=MCPTransportType.get_values())
     command = models.CharField(max_length=10, null=True, blank=True, help_text="Command to run (python, npx, uv)")
     endpoint = models.URLField(null=True, blank=True, validators=[URLValidator(schemes=["https"])], help_text="Remote MCP server endpoint URL")
-    args = ArrayField(base_field=models.CharField(max_length=500), default=list, null=True, blank=True, help_text="Command arguments as array (e.g., ['-y', '@modelcontextprotocol/server-memory'])")
-    secrets = models.JSONField(default=dict, help_text="Environment variables for local MCP server or HTTP headers for remote")
+    args = ArrayField(base_field=models.CharField(max_length=500), default=list, null=True, blank=True,
+                      help_text="Command arguments as array (e.g., ['-y', '@modelcontextprotocol/server-memory'])")
+    secrets = models.JSONField(default=dict, null=True, blank=True,
+                               help_text="Environment variables for local MCP server or HTTP headers for remote")
     is_active = models.BooleanField(default=True)
 
     class Meta:
         verbose_name = "MCP Server"
         verbose_name_plural = "MCP Servers"
+    
+    def clean(self):
+        validate_transport_fields(self.transport, self.command, self.endpoint)
+        return super().clean()
 
     def __str__(self):
         return self.name
@@ -89,12 +103,16 @@ class Message(BaseModel):
         return self.role + ": " + self.content[:50]
 
 
-class AppRunLog(BaseModel):
-    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="run_logs")
+class AppLog(BaseModel):
+    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="app_logs")
     finished_at = models.DateTimeField(null=True)
     is_success = models.BooleanField(default=True)
     error = models.TextField(null=True, blank=True)
     messages_sent = models.PositiveBigIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Log"
+        verbose_name_plural = "Logs"
 
     def __str__(self):
         return self.app.name + ": " + self.created_at
