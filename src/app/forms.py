@@ -3,7 +3,7 @@ import traceback
 
 from django import forms
 
-from app.models import Ollama, App
+from app.models import Ollama, Bot
 from app.ollama import OllamaClient
 
 
@@ -41,11 +41,11 @@ class OllamaForm(forms.ModelForm):
             })
 
 
-class AppForm(forms.ModelForm):
+class BotForm(forms.ModelForm):
     ollama_model = get_model_field()
 
     class Meta:
-        model = App
+        model = Bot
         fields = "__all__"
 
     def __init__(self, *args, **kwargs):
@@ -64,7 +64,7 @@ class AppForm(forms.ModelForm):
                 self.fields["ollama_model"].choices = choices
             except Exception as e:
                 logger.error({
-                    "msg": "AppForm | Error while fetching models from Ollama",
+                    "msg": "BotForm | Error while fetching models from Ollama",
                     "error": str(e),
                     "traceback": traceback.format_exc()
                 })
