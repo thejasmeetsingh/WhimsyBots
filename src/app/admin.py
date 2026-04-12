@@ -5,7 +5,7 @@ from app.models import (
     App,
     MCPServer,
     Message,
-    AppRunLog
+    AppLog
 )
 from app.forms import OllamaForm, AppForm
 
@@ -34,7 +34,7 @@ class AppAdmin(admin.ModelAdmin):
     def get_fieldsets(self, request, obj = ...):
         return (
             ("General Information", {"fields": ("created_by", "name", "description", "ollama_model", "is_active", "created_at")}),
-            ("Scheduling", {"fields": ("interval_mins", "cron_expressions", "next_run_at", "last_run_at")}),
+            ("Scheduling", {"fields": ("interval_mins", "cron_expression", "next_run_at", "last_run_at")}),
             ("System Prompt", {"fields": ("system_prompt",)}),
             ("Communication", {"fields": ("sms_enabled", "email_enabled")})
         )
@@ -63,6 +63,7 @@ class MCPServerAdmin(admin.ModelAdmin):
                 "name",
                 "transport",
                 "command",
+                "endpoint",
                 "args",
                 "secrets",
                 "is_active",
@@ -103,7 +104,7 @@ class MessageAdmin(admin.ModelAdmin):
         return False
 
 
-@admin.register(AppRunLog)
+@admin.register(AppLog)
 class AppRunLogAdmin(admin.ModelAdmin):
     list_display = ("app", "is_success")
     list_filter = ("is_success",)
