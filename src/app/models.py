@@ -16,6 +16,7 @@ class BaseModel(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        ordering = ("-created_at",)
         abstract = True
 
 
@@ -32,7 +33,7 @@ class Ollama(BaseModel):
         verbose_name_plural = "Ollama"
 
 
-class App(BaseModel):
+class Bot(BaseModel):
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
     name = models.CharField(max_length=200)
     description = models.TextField(null=True, blank=True)
@@ -56,8 +57,8 @@ class App(BaseModel):
     email_enabled = models.BooleanField(default=False, help_text="For sending reports only")
 
     class Meta:
-        verbose_name = "App"
-        verbose_name_plural = "Apps"
+        verbose_name = "Bot"
+        verbose_name_plural = "Bots"
 
     def clean(self):
         check_scheduling_fields(self.interval_mins, self.cron_expression)
@@ -68,13 +69,14 @@ class App(BaseModel):
 
 
 class MCPServer(BaseModel):
-    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="mcp_servers")
+    bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="mcp_servers")
     name = models.CharField(max_length=100)
     transport = models.CharField(max_length=1, choices=MCPTransportType.get_values())
     command = models.CharField(max_length=10, null=True, blank=True, help_text="Command to run (python, npx, uv)")
-    endpoint = models.URLField(null=True, blank=True, validators=[URLValidator(schemes=["https"])], help_text="Remote MCP server endpoint URL")
+    endpoint = models.URLField(null=True, blank=True, validators=[URLValidator(schemes=["https"])],
+                               help_text="Remote MCP server endpoint URL")
     args = ArrayField(base_field=models.CharField(max_length=500), default=list, null=True, blank=True,
-                      help_text="Command arguments as array (e.g., ['-y', '@modelcontextprotocol/server-memory'])")
+                      help_text="Command arguments as comma-seperated string (e.g: -y, @modelcontextprotocol/server-memory")
     secrets = models.JSONField(default=dict, null=True, blank=True,
                                help_text="Environment variables for local MCP server or HTTP headers for remote")
     is_active = models.BooleanField(default=True)
@@ -92,7 +94,7 @@ class MCPServer(BaseModel):
 
 
 class Message(BaseModel):
-    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="messages")
+    bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(choices=MessageRole.get_values())
     content = MartorField()
     channel = models.CharField(choices=MessageChannel.get_values())
@@ -103,16 +105,14 @@ class Message(BaseModel):
         return self.role + ": " + self.content[:50]
 
 
-class AppLog(BaseModel):
-    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="app_logs")
-    finished_at = models.DateTimeField(null=True)
+class Log(BaseModel):
+    bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="bot_logs")
     is_success = models.BooleanField(default=True)
     error = models.TextField(null=True, blank=True)
-    messages_sent = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         verbose_name = "Log"
         verbose_name_plural = "Logs"
 
     def __str__(self):
-        return self.app.name + ": " + self.created_at
+        return self.bot.name + ": " + self.created_at
