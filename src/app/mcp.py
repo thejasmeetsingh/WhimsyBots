@@ -70,11 +70,11 @@ class MCPClient:
         self._session = None
 
 
-async def mcp_client(transport_type: str, config: dict[str, Any], params: dict[str, Any]):
+async def mcp_client(transport_type: str, config: dict[str, Any], payload: dict[str, Any] | None = None):
     client = MCPClient(transport_type, config)
 
-    if params["execute_tool"]:
-        response = await client.execute_tool(params["tool_name"], params["tool_args"])
+    if payload:
+        response = await client.execute_tool(**payload)
     else:
         response = await client.list_tools()
 
