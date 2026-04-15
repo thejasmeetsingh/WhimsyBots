@@ -14,23 +14,29 @@ class MCPClient:
         self.transport_type = transport_type
         self.config = config
         self.exit_stack = AsyncExitStack()
-    
-    async def get_session(self) -> ClientSession:
+        self._session: ClientSession | None = None  # cached session
+
+    async def _connect(self) -> ClientSession:
+        if self._session is not None:
+            return self._session
+
         if self.transport_type == MCPTransportType.LOCAL.value[0]:
             params = StdioServerParameters(**self.config)
             (read, write) = await self.exit_stack.enter_async_context(stdio_client(params))
         else:
             http_client = httpx.AsyncClient(headers=self.config.get("headers", {}))
             (read, write, _) = await self.exit_stack.enter_async_context(
-                streamable_http_client(url=self.config["url"], http_client=http_client))
-        
+                streamable_http_client(url=self.config["url"], http_client=http_client)
+            )
+
         session = await self.exit_stack.enter_async_context(ClientSession(read, write))
-        return session
+        await session.initialize()
+
+        self._session = session
+        return self._session
     
     async def list_tools(self) -> list[dict[str, Any]]:
-        session = await self.get_session()
-
-        await session.initialize()
+        session = await self._connect()
         response = await session.list_tools()
 
         tools = []
@@ -54,12 +60,24 @@ class MCPClient:
         return tools
 
     async def execute_tool(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> dict[str, Any]:
-        session = await self.get_session()
-
-        await session.initialize()
+        session = await self._connect()
         response = await session.call_tool(tool_name, tool_args)
 
         return response.model_dump()
 
     async def cleanup(self):
         await self.exit_stack.aclose()
+        self._session = None
+
+
+async def mcp_client(transport_type: str, config: dict[str, Any], params: dict[str, Any]):
+    client = MCPClient(transport_type, config)
+
+    if params["execute_tool"]:
+        response = await client.execute_tool(params["tool_name"], params["tool_args"])
+    else:
+        response = await client.list_tools()
+
+    await client.cleanup()
+
+    return response
