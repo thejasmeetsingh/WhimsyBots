@@ -40,7 +40,7 @@ class BotAdmin(admin.ModelAdmin):
         )}),
         ("Scheduling", {"fields": ("interval_mins", "cron_expression", "next_run_at", "last_run_at")}),
         ("System Prompt", {"fields": ("system_prompt",)}),
-        ("Communication", {"fields": ("telegram_bot_token",)})
+        ("Communication", {"fields": ("telegram_bot_token", "telegram_chat_id")})
     )
 
     readonly_fields = (
@@ -48,7 +48,7 @@ class BotAdmin(admin.ModelAdmin):
         "created_at",
         "next_run_at",
         "last_run_at",
-        "telegram_bot_token",
+        "telegram_chat_id",
         "get_stats",
         "last_execution_status"
     )
@@ -159,17 +159,15 @@ class MCPServerAdmin(admin.ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ("bot", "role", "channel", "status", "is_report_request")
-    list_filter = ("is_report_request",)
+    list_display = ("bot", "role", "intent")
+    list_filter = ("role", "intent")
     search_fields = ("bot__name",)
     fieldsets = (
         (None, {"fields": (
             "bot",
             "role",
             "content",
-            "channel",
-            "status",
-            "is_report_request",
+            "intent",
             "created_at"
         )}),
     )
@@ -195,10 +193,8 @@ class LogAdmin(admin.ModelAdmin):
     fieldsets = (
         (None, {"fields": (
             "bot",
-            "finished_at",
             "is_success",
-            "error",
-            "messages_sent",
+            "description",
             "created_at"
         )}),
     )
