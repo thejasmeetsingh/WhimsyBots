@@ -1,5 +1,12 @@
+import logging
+from io import BytesIO
+
+from weasyprint import HTML
 from croniter import croniter
 from django.utils import timezone
+
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_next_run_at(interval_mins, cron_expression):
@@ -42,6 +49,19 @@ def parse_telegram_update(update: dict) -> dict | None:
         "first_name": msg.get("from", {}).get("first_name", ""),
         "date":       msg.get("date"),
     }
+
+
+def generate_pdf(html_content: str) -> bytes:
+    pdf_buffer = BytesIO()
+
+    try:
+        HTML(string=html_content).write_pdf(target=pdf_buffer)
+    except Exception as e:
+        logger.exception(f"WeasyPrint PDF generation failed: {e}")
+        raise
+
+    pdf_buffer.seek(0)
+    return pdf_buffer.read()
 
 
 def convert_messages_to_ollama_format(messages, system_prompt=None):
