@@ -24,7 +24,8 @@ RUN apk add --no-cache \
     postgresql-client \
     libpq \
     nodejs \
-    npm
+    npm \
+    weasyprint
 
 # Copy Python dependencies from builder
 COPY --from=builder /root/.local /root/.local
