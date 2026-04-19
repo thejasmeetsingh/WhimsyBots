@@ -7,7 +7,7 @@ from martor.models import MartorField
 
 from user.models import User
 from app.validators import validate_cron_expression, check_scheduling_fields, validate_transport_fields
-from app.choices import MCPTransportType, MessageChannel, MessageIntentType, MessageRole, MessageStatus
+from app.choices import MCPTransportType, MessageIntentType, MessageRole
 
 
 class BaseModel(models.Model):
@@ -53,6 +53,7 @@ class Bot(BaseModel):
 
     # Communication
     telegram_bot_token = models.CharField(max_length=255, unique=True)
+    telegram_chat_id = models.CharField(max_length=255, unique=True, null=True)
 
     class Meta:
         verbose_name = "Bot"
@@ -94,11 +95,8 @@ class MCPServer(BaseModel):
 class Message(BaseModel):
     bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(choices=MessageRole.get_values())
-    intent = models.CharField(choices=MessageIntentType.get_values())
+    intent = models.CharField(choices=MessageIntentType.get_values(), null=True)
     content = MartorField()
-    channel = models.CharField(choices=MessageChannel.get_values())
-    status = models.CharField(choices=MessageStatus.get_values(), default=MessageStatus.PENDING.value[0])
-    is_report_request = models.BooleanField(default=False)
 
     def __str__(self):
         return self.role + ": " + self.content[:50]
@@ -107,7 +105,7 @@ class Message(BaseModel):
 class Log(BaseModel):
     bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="bot_logs")
     is_success = models.BooleanField(default=True)
-    error = models.TextField(null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Log"

@@ -18,19 +18,6 @@ class MessageRole(BaseChoices):
     ASSISTANT = ("A", "Assistant")
 
 
-class MessageChannel(BaseChoices):
-    SMS = ("S", "SMS")
-    EMAIL = ("E", "Email")
-
-
-class MessageStatus(BaseChoices):
-    PENDING = ("P", "Pending")
-    SENT = ("S", "Sent")
-    FAILED = ("F", "Failed")
-    DELIVERED = ("D", "Delivered")
-    RECEIVED = ("R", "Received")
-
-
 class MessageIntentType(BaseChoices):
     JOURNAL = ("J", "Journal Entry")
     REPORT = ("R", "Report Request")
