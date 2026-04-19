@@ -26,7 +26,7 @@ class BotAdmin(admin.ModelAdmin):
     form = BotForm
     list_display = ("name", "created_by", "is_active")
     search_fields = ("name", "created_by__email", "created_by__first_name")
-    list_filter = ("is_active", "sms_enabled", "email_enabled")
+    list_filter = ("is_active",)
     fieldsets = (
         ("General Information", {"fields": (
             "created_by",
@@ -40,7 +40,7 @@ class BotAdmin(admin.ModelAdmin):
         )}),
         ("Scheduling", {"fields": ("interval_mins", "cron_expression", "next_run_at", "last_run_at")}),
         ("System Prompt", {"fields": ("system_prompt",)}),
-        ("Communication", {"fields": ("sms_enabled", "email_enabled")})
+        ("Communication", {"fields": ("telegram_bot_token",)})
     )
 
     readonly_fields = (
@@ -48,6 +48,7 @@ class BotAdmin(admin.ModelAdmin):
         "created_at",
         "next_run_at",
         "last_run_at",
+        "telegram_bot_token",
         "get_stats",
         "last_execution_status"
     )
