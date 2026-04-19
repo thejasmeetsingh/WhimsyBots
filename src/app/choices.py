@@ -29,3 +29,10 @@ class MessageStatus(BaseChoices):
     FAILED = ("F", "Failed")
     DELIVERED = ("D", "Delivered")
     RECEIVED = ("R", "Received")
+
+
+class MessageIntentType(BaseChoices):
+    JOURNAL = ("J", "Journal Entry")
+    REPORT = ("R", "Report Request")
+    QUESTION = ("Q", "Question/Query")
+    OTHER = ("O", "Other")

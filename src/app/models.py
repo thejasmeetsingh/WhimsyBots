@@ -7,7 +7,7 @@ from martor.models import MartorField
 
 from user.models import User
 from app.validators import validate_cron_expression, check_scheduling_fields, validate_transport_fields
-from app.choices import MCPTransportType, MessageChannel, MessageRole, MessageStatus
+from app.choices import MCPTransportType, MessageChannel, MessageIntentType, MessageRole, MessageStatus
 
 
 class BaseModel(models.Model):
@@ -52,9 +52,7 @@ class Bot(BaseModel):
     system_prompt = MartorField(null=True, blank=True)
 
     # Communication
-    sms_enabled = models.BooleanField(default=True, verbose_name="SMS enabled",
-                                      help_text="Main interface for communication")
-    email_enabled = models.BooleanField(default=False, help_text="For sending reports only")
+    telegram_bot_token = models.CharField(max_length=255, unique=True)
 
     class Meta:
         verbose_name = "Bot"
@@ -96,6 +94,7 @@ class MCPServer(BaseModel):
 class Message(BaseModel):
     bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(choices=MessageRole.get_values())
+    intent = models.CharField(choices=MessageIntentType.get_values())
     content = MartorField()
     channel = models.CharField(choices=MessageChannel.get_values())
     status = models.CharField(choices=MessageStatus.get_values(), default=MessageStatus.PENDING.value[0])
