@@ -17,7 +17,6 @@ ALLOWED_HOSTS = ["127.0.0.1", "0.0.0.0", "localhost"]
 
 INSTALLED_APPS = [
     "app",
-    "user",
 
     "martor",
 
@@ -113,7 +112,6 @@ STATIC_ROOT = os.path.join(BASE_DIR, "static")
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 LOGIN_URL = "/admin/login/"
-AUTH_USER_MODEL = "user.User"
 
 
 # Martor Config
@@ -176,19 +174,3 @@ logging.config.dictConfig({
 # Celery
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
-
-
-# Twillio
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
-
-
-# Email
-EMAIL_HOST = "smtp.sendgrid.net"
-EMAIL_HOST_USER = "apikey"
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-DEFAULT_EMAIL_FROM_NAME = os.getenv("DEFAULT_EMAIL_FROM_NAME")
-EMAIL_SENT_FROM = os.getenv("EMAIL_SENT_FROM")

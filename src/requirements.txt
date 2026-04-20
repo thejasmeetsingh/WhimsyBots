@@ -40,7 +40,6 @@ mcp==1.27.0
 multidict==6.7.1
 ollama==0.6.1
 packaging==26.0
-phonenumbers==9.0.27
 pillow==12.2.0
 prompt_toolkit==3.0.52
 propcache==0.4.1
@@ -56,7 +55,6 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-json-logger==4.1.0
 python-multipart==0.0.24
-pywin32==311
 redis==6.4.0
 referencing==0.37.0
 requests==2.33.1
@@ -67,7 +65,6 @@ sse-starlette==3.3.4
 starlette==1.0.0
 tinycss2==1.5.1
 tinyhtml5==2.1.0
-twilio==9.10.5
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzdata==2025.3
