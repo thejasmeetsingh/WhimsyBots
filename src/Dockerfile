@@ -25,7 +25,11 @@ RUN apk add --no-cache \
     libpq \
     nodejs \
     npm \
-    weasyprint
+    weasyprint \
+    ttf-dejavu \
+    ttf-freefont \
+    ttf-liberation \
+    fontconfig
 
 # Copy Python dependencies from builder
 COPY --from=builder /root/.local /root/.local
