@@ -25,7 +25,7 @@ class OllamaAdmin(admin.ModelAdmin):
 class BotAdmin(admin.ModelAdmin):
     form = BotForm
     list_display = ("name", "created_by", "is_active")
-    search_fields = ("name", "created_by__email", "created_by__first_name")
+    search_fields = ("name", "created_by__username", "created_by__first_name")
     list_filter = ("is_active",)
     fieldsets = (
         ("General Information", {"fields": (
@@ -67,8 +67,7 @@ class BotAdmin(admin.ModelAdmin):
         convo_msgs = reports = active = inactive = successes = errors = 0
 
         if obj:
-            convo_msgs = obj.messages.filter(is_report_request=False).count()
-            reports = obj.messages.filter(is_report_request=True).count()
+            msgs_count = obj.messages.count()
 
             active = obj.mcp_servers.filter(is_active=True).count()
             inactive = obj.mcp_servers.filter(is_active=False).count()
@@ -80,13 +79,12 @@ class BotAdmin(admin.ModelAdmin):
             <table cellpadding="10" cellspacing="10" style="text-align: center; border: 2px solid #ccc;">
                 <thead>
                     <tr>
-                        <th colspan="2">Messages</th>
+                        <th>Messages</th>
                         <th colspan="2">MCP Servers</th>
                         <th colspan="2">Logs</th>
                     </tr>
                     <tr>
-                        <th>Coversations</th>
-                        <th>Reports</th>
+                        <th></th>
                         <th>Active</th>
                         <th>Inactive</th>
                         <th>Successes</th>
@@ -95,8 +93,7 @@ class BotAdmin(admin.ModelAdmin):
                 </thead>
                 <tbody>
                     <tr>
-                        <td>{get_admin_link("message", convo_msgs, "bot_id", obj)}</td>
-                        <td>{get_admin_link("message", reports, "bot_id", obj)}</td>
+                        <td>{get_admin_link("message", msgs_count, "bot_id", obj)}</td>
                         <td>{get_admin_link("mcpserver", active, "bot_id", obj)}</td>
                         <td>{get_admin_link("mcpserver", inactive, "bot_id", obj)}</td>
                         <td>{get_admin_link("log", successes, "bot_id", obj)}</td>

@@ -1,11 +1,11 @@
 import uuid
 
 from django.db import models
+from django.contrib.auth.models import User
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import URLValidator, MinValueValidator
 from martor.models import MartorField
 
-from user.models import User
 from app.validators import validate_cron_expression, check_scheduling_fields, validate_transport_fields
 from app.choices import MCPTransportType, MessageIntentType, MessageRole
 
@@ -16,7 +16,6 @@ class BaseModel(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ("-created_at",)
         abstract = True
 
 
@@ -56,6 +55,7 @@ class Bot(BaseModel):
     telegram_chat_id = models.CharField(max_length=255, unique=True, null=True)
 
     class Meta:
+        ordering = ("-created_at",)
         verbose_name = "Bot"
         verbose_name_plural = "Bots"
 
@@ -75,12 +75,13 @@ class MCPServer(BaseModel):
     endpoint = models.URLField(null=True, blank=True, validators=[URLValidator(schemes=["https"])],
                                help_text="Remote MCP server endpoint URL")
     args = ArrayField(base_field=models.CharField(max_length=500), default=list, null=True, blank=True,
-                      help_text="Command arguments as comma-seperated string (e.g: -y, @modelcontextprotocol/server-memory")
+                      help_text="Command arguments as comma-seperated string (e.g: -y, @modelcontextprotocol/server-memory)")
     secrets = models.JSONField(default=dict, null=True, blank=True,
                                help_text="Environment variables for local MCP server or HTTP headers for remote")
     is_active = models.BooleanField(default=True)
 
     class Meta:
+        ordering = ("-created_at",)
         verbose_name = "MCP Server"
         verbose_name_plural = "MCP Servers"
     
@@ -98,6 +99,9 @@ class Message(BaseModel):
     intent = models.CharField(choices=MessageIntentType.get_values(), null=True)
     content = MartorField()
 
+    class Meta:
+        ordering = ("-created_at",)
+
     def __str__(self):
         return self.role + ": " + self.content[:50]
 
@@ -108,6 +112,7 @@ class Log(BaseModel):
     description = models.TextField(null=True, blank=True)
 
     class Meta:
+        ordering = ("-created_at",)
         verbose_name = "Log"
         verbose_name_plural = "Logs"
 
