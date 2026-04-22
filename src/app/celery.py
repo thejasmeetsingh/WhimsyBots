@@ -3,75 +3,71 @@
 import logging
 from typing import Optional
 
+import redis
 from django.utils import timezone
+from django.conf import settings
 from clients import OllamaClient
 
-from app.models import Bot, Ollama, Message
-from app.utils import calculate_next_run_at, parse_telegram_update
+from app.models import Bot, Message
+from app.utils import calculate_next_run_at
 from whimsybots.celery import task as celery
 from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
 from app.services import (
     BotMessageProcessor,
     ReportGeneratorService,
+    TelegramUpdateHandler,
 )
 
+
+POLL_OFFSET_KEY = "telegram:poll_offset:{bot_id}"  # Redis key
+POLL_LOCK_KEY   = "telegram:poll_lock:{bot_id}"    # Redis key for distributed lock
 
 logger = logging.getLogger(__name__)
 
 
-def handle_inbound_update(bot_id: str, update: dict) -> None:
+@celery.task(bind=True, max_retries=3)
+def telegram_poller():
     """
-    Handle incoming Telegram updates and queue for processing.
-
-    Args:
-        bot_id: ID of the bot receiving the update
-        update: Telegram update dictionary
-
-    Raises:
-        Bot.DoesNotExist: If bot not found
+    Polls Telegram for new messages and dispatches them.
+      - Offset is persisted in Redis so it survives worker restarts.
+      - A Redis lock ensures only one instance runs at a time across all workers.
     """
 
-    try:
-        parsed = parse_telegram_update(update)
-        if not parsed:
-            logger.warning("Failed to parse Telegram update")
+    r = redis.from_url(settings.CELERY_BROKER_URL)
+
+    # Fetch active bots
+    bots = Bot.objects.filter(is_active=True, telegram_chat_id__isnull=False)
+
+    for bot in bots:
+        poll_lock_key = POLL_LOCK_KEY.format(bot_id=str(bot.id))
+        poll_offset_key = POLL_OFFSET_KEY.format(bot_id=str(bot.id))
+
+        # Distributed lock — 10s expiry to auto-release if worker crashes
+        lock = r.lock(poll_lock_key, timeout=10, blocking_timeout=0)
+        if not lock.acquire(blocking=False):
+            logger.debug("telegram_poller: another worker is already polling, skipping")
             return
 
-        chat_id = parsed["chat_id"]
-        text = parsed["text"]
+        try:
+            # Retreive offset from redis or 0
+            offset = int(r.get(poll_offset_key) or 0)
 
-        bot = Bot.objects.get(id=bot_id)
+            # Fetch messages for bot
+            telegram_client = TelegramClientManager.create_client(bot)
+            updates = telegram_client.get_updates(offset=offset + 1)
 
-        # Update chat_id if not already set
-        if not bot.telegram_chat_id:
-            bot.telegram_chat_id = str(chat_id)
-            bot.save(update_fields=["telegram_chat_id"])
-
-        # Create message
-        message = Message.objects.create(
-            bot=bot,
-            role="user",
-            content=text,
-        )
-
-        # Send typing indicator
-        telegram_client = TelegramClientManager.create_client(bot)
-        telegram_client.send_typing_action()
-
-        # Queue for processing
-        process_inbound_message.apply_async(
-            kwargs={"bot_id": str(bot.id), "msg_id": str(message.id)}
-        )
-
-        logger.info(f"Queued message {message.id} for processing")
-
-    except Bot.DoesNotExist:
-        logger.error(
-            CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
-        )
-    except Exception as e:
-        logger.error("Failed to handle inbound update", exc_info=True)
+            for update in updates:
+                try:
+                    TelegramUpdateHandler.handle_update(str(bot.id), update)
+                    # Persist offset immediately after each successful dispatch
+                    r.set(poll_offset_key, update["update_id"])
+                except Exception as e:
+                    logger.exception(f"Error handling update {update.get('update_id')}: {e}")
+                    # Don't update offset on failure — will retry this update next poll
+                    break
+        finally:
+            lock.release()
 
 
 @celery.task(bind=True, max_retries=3)
