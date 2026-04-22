@@ -1,0 +1,287 @@
+"""
+Telegram bot client.
+
+Provides a high-level interface for Telegram Bot API interactions.
+Handles message sending, file uploads, user actions, and webhook updates.
+"""
+
+import logging
+from typing import Dict, List, Optional
+
+import requests
+
+from app.utils import split_message
+
+
+logger = logging.getLogger(__name__)
+
+
+class TelegramError(Exception):
+    """
+    Custom exception for Telegram API errors.
+    
+    Raised when:
+    - HTTP request fails
+    - Telegram API returns error status
+    - Required chat_id is missing
+    """
+    pass
+
+
+class TelegramClient:
+    """
+    Client for interacting with Telegram Bot API.
+    
+    Provides methods to send messages, documents, and user actions to a Telegram chat.
+    Automatically handles message splitting for long texts (Telegram limit: 4096 chars).
+    
+    Attributes:
+        base_url (str): Telegram API base URL (constructed from token)
+        chat_id (str): Target chat ID for operations
+        
+    Example:
+        >>> from clients import TelegramClient
+        >>> client = TelegramClient("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", "987654321")
+        >>> client.send_message("Hello from WhimsyBots!")
+        >>> client.send_typing_action()
+    """
+
+    base_url: str = None
+    chat_id: str = None
+
+    def __init__(self, token: str, chat_id: str = None):
+        """
+        Initialize Telegram client.
+        
+        Args:
+            token (str): Telegram bot API token (from BotFather)
+                Format: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+            chat_id (str | None): Default target chat ID
+                Can be overridden per method if needed
+                
+        Example:
+            >>> client = TelegramClient(
+            ...     token="123456:ABC-DEF...",
+            ...     chat_id="987654321"
+            ... )
+        """
+
+        self.chat_id = chat_id
+        self.base_url = f"https://api.telegram.org/bot{token}"
+
+    def _post(self, endpoint: str, payload: Dict) -> Dict:
+        """
+        Make authenticated POST request to Telegram API.
+        
+        Handles HTTP request, response validation, and error handling.
+        
+        Args:
+            endpoint (str): API endpoint name (e.g., 'sendMessage', 'sendDocument')
+            payload (dict): Request body as JSON
+            
+        Returns:
+            dict: Response result (from api response["result"])
+            
+        Raises:
+            TelegramError: If HTTP status != 200 or ok != true
+            
+        Internal method - not meant to be called directly.
+        """
+
+        url = f"{self.base_url}/{endpoint}"
+
+        response = requests.post(url=url, json=payload)
+        if response.status_code != 200:
+            raise TelegramError(
+                f"Telegram API error: Status code - {response.status_code}"
+            )
+
+        data = response.json()
+        if not data.get("ok"):
+            raise TelegramError(f"Telegram API error on {endpoint}: {data}")
+
+        return data["result"]
+
+    def send_message(
+        self,
+        text: str,
+        parse_mode: str = "Markdown"
+    ) -> Dict:
+        """
+        Send a text message to the chat.
+        
+        Automatically splits long messages into multiple messages if text exceeds
+        4096 characters (Telegram limit), sending each chunk separately.
+        
+        Args:
+            text (str): Message text to send
+                - Supports Markdown formatting when parse_mode="Markdown"
+                - Plain text when parse_mode="HTML"
+            parse_mode (str): Text formatting
+                Default: "Markdown" (supports **bold**, *italic*, `code`, etc.)
+                Options: "Markdown", "MarkdownV2", "HTML", None (plain text)
+                
+        Returns:
+            dict: API response with sent message details
+                - message_id: Unique message identifier
+                - chat: Chat information
+                - from: Bot info
+                - date: Send timestamp
+                - text: Message text sent
+                
+        Raises:
+            TelegramError: If message sending fails
+            
+        Example - Simple message:
+            >>> client.send_message("Hello World!")
+            
+        Example - Formatted message:
+            >>> client.send_message(
+            ...     "**Bold** and *italic* text",
+            ...     parse_mode="Markdown"
+            ... )
+            
+        Example - Long message (auto-split):
+            >>> very_long_text = "x" * 10000
+            >>> client.send_message(very_long_text)  # Sends 3 messages
+        """
+
+        result = {}
+        chunks = split_message(text)
+
+        for chunk in chunks:
+            result = self._post("sendMessage", {
+                "chat_id": self.chat_id,
+                "text": chunk,
+                "parse_mode": parse_mode,
+            })
+
+        return result
+
+    def send_document(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        caption: str = ""
+    ) -> Dict:
+        """
+        Send a document (file) to the chat.
+        
+        Sends binary file content as a Telegram document.
+        Used for reports, PDFs, etc.
+        
+        Args:
+            file_bytes (bytes): File content as bytes
+            filename (str): Filename to display (e.g., "report.pdf")
+            caption (str): Optional caption text below the file
+                
+        Returns:
+            dict: API response with sent document details
+                - message_id: Unique message identifier
+                - document: Document information (file_id, file_size, etc.)
+                - caption: Caption text sent
+                
+        Raises:
+            TelegramError: If file sending fails
+            
+        Example - Send PDF report:
+            >>> pdf_bytes = generate_pdf(html_content)
+            >>> client.send_document(
+            ...     file_bytes=pdf_bytes,
+            ...     filename="report-2024-04.pdf",
+            ...     caption="📄 Your monthly report"
+            ... )
+        """
+
+        url = f"{self.base_url}/sendDocument"
+
+        response = requests.post(
+            url,
+            data={"chat_id": self.chat_id, "caption": caption},
+            files={"document": (filename, file_bytes, "application/octet-stream")}
+        )
+
+        if response.status_code != 200:
+            raise TelegramError(
+                f"Telegram 'sendDocument' API error: Status code - {response.status_code}"
+            )
+
+        data = response.json()
+        if not data.get("ok"):
+            raise TelegramError(f"Failed to send document: {data}")
+
+        return data["result"]
+
+    def send_typing_action(self) -> Dict:
+        """
+        Show 'typing...' indicator in chat.
+        
+        Sends a typing action that displays "Bot is typing..." to the user.
+        Useful for indicating processing before sending a response.
+        
+        Returns:
+            dict: API response (empty on success)
+            
+        Raises:
+            TelegramError: If operation fails
+            
+        Example:
+            >>> client.send_typing_action()  # Show typing indicator
+            >>> # ... do some processing ...
+            >>> client.send_message("Here's your response!")
+        """
+
+        return self._post("sendChatAction", {
+            "chat_id": self.chat_id,
+            "action": "typing"
+        })
+
+    def get_updates(
+        self,
+        offset: int = 0,
+        timeout: int = 20
+    ) -> List[Dict]:
+        """
+        Get pending updates from Telegram.
+        
+        Long polls Telegram for incoming messages and events.
+        Used for webhook-style polling (alternative to webhook URL).
+        
+        Args:
+            offset (int): Update ID to start from
+                Increment this after processing updates to avoid re-receiving
+                Default: 0 (gets oldest unprocessed updates)
+            timeout (int): Long poll timeout in seconds
+                Keeps connection open up to this duration waiting for updates
+                Default: 20 seconds
+                
+        Returns:
+            list[dict]: List of updates, each containing:
+                - update_id: Unique update identifier
+                - message: Message object (if available)
+                - other updates...
+                
+        Raises:
+            TelegramError: If API call fails
+            
+        Example - Polling loop:
+            >>> offset = 0
+            >>> while True:
+            ...     updates = client.get_updates(offset=offset, timeout=20)
+            ...     for update in updates:
+            ...         process_update(update)
+            ...         offset = update["update_id"] + 1
+                
+        Note:
+            - Only "message" updates are requested (allowed_updates=["message"])
+            - Returns empty list if no updates within timeout period
+            - In production, typically use Telegram webhook instead of polling
+        """
+
+        result = self._post("getUpdates", {
+            "offset": offset,
+            "timeout": timeout,
+            "allowed_updates": ["message"],
+        })
+
+        return result or []
