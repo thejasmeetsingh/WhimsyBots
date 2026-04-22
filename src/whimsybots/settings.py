@@ -3,6 +3,7 @@ import logging.config
 from pathlib import Path
 
 from django.utils.log import DEFAULT_LOGGING
+from celery.schedules import crontab
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -174,3 +175,18 @@ logging.config.dictConfig({
 # Celery
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
+
+CELERY_BEAT_SCHEDULE = {
+    # Handles scheduled app runs (journaling prompts, briefings, etc.)
+    # Runs every minute — latency acceptable for scheduled outbound messages
+    "master-poller": {
+        "task": "app.celery.master_poller",
+        "schedule": crontab(minute="*"),
+    },
+    # Spawns per-app telegram poller tasks for all active apps
+    # Runs every 3 seconds for responsive, chat-like UX
+    "telegram-poller-spawner": {
+        "task": "app.celery.telegram_poller",
+        "schedule": 3.0,
+    },
+}
