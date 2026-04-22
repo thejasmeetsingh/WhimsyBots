@@ -1,20 +1,98 @@
 import logging
-import traceback
+from typing import Optional
 
 from django import forms
 
 from app.models import Ollama, Bot
-from app.ollama import OllamaClient
+from clients import OllamaClient
 
 
 logger = logging.getLogger(__name__)
 
+# Form field configuration constants
+DEFAULT_MODEL_HELP_TEXT = "Please select a model which supports tool calling"
+EMPTY_MODEL_CHOICE = (None, "Select a model")
+EMPTY_MODEL_CHOICES = [EMPTY_MODEL_CHOICE]
 
-def get_model_field():
-    return forms.ChoiceField(choices=[(None, "Select a model")], required=False, help_text="Please select model which supports tool calling")
+
+def fetch_ollama_models(
+    endpoint: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> list[str]:
+    """
+    Fetch available models from Ollama client.
+    
+    Args:
+        endpoint: Ollama API endpoint URL
+        api_key: Ollama API key for authentication
+        
+    Returns:
+        List of available model names, empty list on error
+        
+    Raises:
+        Logs errors but returns empty list on any exception
+    """
+
+    try:
+        client = OllamaClient(endpoint=endpoint, api_key=api_key)
+        return client.list_models()
+    except Exception as e:
+        logger.error(
+            "Failed to fetch Ollama models from endpoint %s",
+            endpoint,
+            exc_info=True
+        )
+        return []
+
+
+def format_model_choices(
+    models: list[str],
+    preferred_model: Optional[str] = None
+) -> list[tuple[str, str]]:
+    """
+    Convert model list to form choice tuples, optionally sorting with preferred model first.
+    
+    Args:
+        models: List of model names
+        preferred_model: Optional model to prioritize in the list
+        
+    Returns:
+        List of tuples suitable for form ChoiceField
+    """
+
+    # Convert models to choice tuples
+    choices = [(model, model) for model in models]
+    
+    # Sort with preferred model first if specified
+    if preferred_model and any(choice[0] == preferred_model for choice in choices):
+        preferred = [choice for choice in choices if choice[0] == preferred_model]
+        others = [choice for choice in choices if choice[0] != preferred_model]
+        choices = preferred + others
+    
+    return choices
+
+
+def get_model_field() -> forms.ChoiceField:
+    """
+    Factory function to create a standardized model selection field.
+    
+    Returns:
+        ChoiceField configured for model selection
+    """
+
+    return forms.ChoiceField(
+        choices=EMPTY_MODEL_CHOICES,
+        required=False,
+        help_text=DEFAULT_MODEL_HELP_TEXT
+    )
 
 
 class OllamaForm(forms.ModelForm):
+    """
+    Form for Ollama configuration.
+    Dynamically populates available models from the configured Ollama instance.
+    """
+
     default_model = get_model_field()
 
     class Meta:
@@ -22,26 +100,34 @@ class OllamaForm(forms.ModelForm):
         fields = "__all__"
 
     def __init__(self, *args, **kwargs):
-        instance = kwargs.get("instance")
         super().__init__(*args, **kwargs)
+        self._populate_model_choices()
 
-        try:
-            endpoint = instance.endpoint if instance and instance.endpoint else None
-            api_key = instance.api_key if instance and instance.api_key else None
-            o_client = OllamaClient(endpoint=endpoint, api_key=api_key)
+    def _populate_model_choices(self) -> None:
+        """
+        Fetch and populate available Ollama models in the form field.
+        Handles errors gracefully by leaving default empty choices if fetch fails.
+        """
 
-            models = o_client.list_models()
-            choices = list(map(lambda model: (model, model), models))
-            self.fields["default_model"].choices = choices
-        except Exception as e:
-            logger.error({
-                "msg": "OllamaForm | Error while fetching models from Ollama",
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            })
+        instance = self.instance
+        if not instance or not instance.pk:
+            return
+
+        endpoint = getattr(instance, "endpoint", None)
+        api_key = getattr(instance, "api_key", None)
+        
+        models = fetch_ollama_models(endpoint=endpoint, api_key=api_key)
+        if models:
+            self.fields["default_model"].choices = format_model_choices(models)
 
 
 class BotForm(forms.ModelForm):
+    """
+    Form for Bot configuration.
+    Dynamically populates available models from the configured Ollama instance,
+    with the default model prioritized in the list.
+    """
+
     ollama_model = get_model_field()
 
     class Meta:
@@ -50,21 +136,26 @@ class BotForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._populate_model_choices()
+
+    def _populate_model_choices(self) -> None:
+        """
+        Fetch and populate available Ollama models in the form field.
+        Prioritizes the default model from Ollama configuration if available.
+        Handles errors gracefully by leaving default empty choices if fetch fails.
+        """
 
         ollama_obj = Ollama.objects.first()
-        if ollama_obj:
-            try:
-                o_client = OllamaClient(endpoint=ollama_obj.endpoint, api_key=ollama_obj.api_key)
-                models = o_client.list_models()
-                choices = list(map(lambda model: (model, model), models))
-                
-                if ollama_obj.default_model:
-                    choices.sort(key=lambda x: x[0] != ollama_obj.default_model)
+        if not ollama_obj:
+            return
 
-                self.fields["ollama_model"].choices = choices
-            except Exception as e:
-                logger.error({
-                    "msg": "BotForm | Error while fetching models from Ollama",
-                    "error": str(e),
-                    "traceback": traceback.format_exc()
-                })
+        endpoint = getattr(ollama_obj, "endpoint", None)
+        api_key = getattr(ollama_obj, "api_key", None)
+        default_model = getattr(ollama_obj, "default_model", None)
+        
+        models = fetch_ollama_models(endpoint=endpoint, api_key=api_key)
+        if models:
+            self.fields["ollama_model"].choices = format_model_choices(
+                models,
+                preferred_model=default_model
+            )
