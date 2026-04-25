@@ -10,7 +10,8 @@ from app.choices import MessageIntentType, MessageRole
 from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
 from app.services.message_intent_classifier import MessageIntentClassifier
-from app.services.tool_executor import ToolExecutor, MCPToolsBuilder
+from app.services.tool_executor import MCPToolsBuilder
+from app.services.tool_calling_coordinator import run_tool_calling_loop
 from app.utils import convert_messages_to_ollama_format
 
 
@@ -66,17 +67,14 @@ class BotMessageProcessor:
                 return "report_requested"
 
             # Process message with tools
-            return self._process_with_tools(message)
+            return self._process_with_tools()
         except Exception as e:
             logger.error("Failed to process message", exc_info=True)
             raise
 
-    def _process_with_tools(self, message: Message) -> str:
+    def _process_with_tools(self) -> str:
         """
         Process message with tool calling loop.
-
-        Args:
-            message: Message to process
 
         Returns:
             Final response from Ollama
@@ -87,7 +85,6 @@ class BotMessageProcessor:
             tools_config = asyncio.run(
                 MCPToolsBuilder.build_tools_from_servers(self.bot.mcp_servers)
             )
-            tool_executor = ToolExecutor(tools_config)
 
             # Prepare message history
             history = convert_messages_to_ollama_format(
@@ -95,36 +92,14 @@ class BotMessageProcessor:
                 system_prompt=self.bot.system_prompt
             )
 
-            # Tool calling loop
-            while True:
-                response = self.ollama_client.chat(
-                    model=self.model,
-                    messages=history,
-                    tools=[tool.tool for tool in tools_config],
-                    options={
-                        "temperature": self.ollama.temperature,
-                        "num_ctx": self.ollama.num_ctx,
-                        "num_predict": self.ollama.num_predict
-                    }
-                )
-
-                # Break if no tools were called
-                if not response.get("tools"):
-                    break
-
-                # Execute each tool call
-                for tool_call in response.get("tools", []):
-                    tool_call_dict = tool_call.model_dump()
-                    result = tool_executor.execute_tool_call_sync(tool_call_dict)
-
-                    if result is not None:
-                        history.append({
-                            "role": "tool",
-                            "content": result,
-                            "tool_calls": [{"function": tool_call_dict}]
-                        })
-
-            return response.get("message", "")
+            # Run tool calling loop
+            return run_tool_calling_loop(
+                ollama_client=self.ollama_client,
+                model=self.model,
+                history=history,
+                tools_config=tools_config,
+                ollama=self.ollama,
+            )
         except Exception as e:
             logger.error("Failed to process message with tools", exc_info=True)
             raise
