@@ -63,7 +63,7 @@ def telegram_poller(self):
 
                 for update in updates:
                     try:
-                        TelegramUpdateHandler.handle_update(str(bot.id), update)
+                        TelegramUpdateHandler.handle_update(bot, update)
                         # Persist offset immediately after each successful dispatch
                         r.set(poll_offset_key, update["update_id"])
                     except Exception as e:
@@ -110,9 +110,10 @@ def master_poller(self):
 
         logger.info(f"Found {due_bots.count()} bots due for execution")
 
-        # Queue each bot for processing
+        # Queue each bot for processing on default worker
         for bot in due_bots:
             process_inbound_message.apply_async(
+                queue="default",
                 kwargs={"bot_id": str(bot.id), "msg_id": None},
                 eta=bot.next_run_at
             )
@@ -159,7 +160,7 @@ def process_inbound_message(self, bot_id: str, msg_id: Optional[str] = None):
 
         # Get bot
         try:
-            bot = Bot.objects.prefetch_related("messages", "mcp_servers").get(id=bot_id)
+            bot = Bot.objects.get(id=bot_id)
         except Bot.DoesNotExist:
             logger.error(
                 CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
@@ -185,7 +186,10 @@ def process_inbound_message(self, bot_id: str, msg_id: Optional[str] = None):
 
             # Check if report was requested
             if result == "report_requested":
-                generate_report.apply_async(kwargs={"bot_id": str(bot.id)})
+                generate_report.apply_async(
+                    queue="default",
+                    kwargs={"bot_id": str(bot.id)}
+                )
                 return "Report generation queued"
 
             # Send response
@@ -227,7 +231,7 @@ def generate_report(self, bot_id: str):
 
         # Get bot
         try:
-            bot = Bot.objects.prefetch_related("messages").get(id=bot_id)
+            bot = Bot.objects.get(id=bot_id)
         except Bot.DoesNotExist:
             logger.error(
                 CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
