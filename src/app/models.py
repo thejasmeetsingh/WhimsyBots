@@ -71,9 +71,10 @@ class Ollama(BaseModel):
         default=4096,
         help_text="Context window size in tokens"
     )
-    num_predict = models.IntegerField(
-        default=-1,
-        help_text="Max tokens to generate (-1 = infinite/default)"
+    num_predict = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Max tokens to generate (leave it blank = infinite/default)"
     )
 
     class Meta:
