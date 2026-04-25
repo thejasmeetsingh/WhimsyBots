@@ -36,14 +36,14 @@ class TelegramUpdateHandler:
     Example:
         >>> from app.celery import process_inbound_message
         >>> TelegramUpdateHandler.handle_update(
-        ...     bot_id='550e8400-e29b-41d4-a716-446655440000',
+        ...     bot=Bot(...),
         ...     update={'update_id': 123, 'message': {...}}
         ... )
         >>> # Message is now queued for processing
     """
 
     @staticmethod
-    def handle_update(bot_id: str, update: Dict[str, Any]) -> None:
+    def handle_update(bot: Bot, update: Dict[str, Any]) -> None:
         """
         Handle a single incoming Telegram update.
         
@@ -56,7 +56,7 @@ class TelegramUpdateHandler:
         happens asynchronously in the Celery task.
         
         Args:
-            bot_id (str): ID of the bot receiving the update
+            bot (Bot): Bot model instance
             update (dict): Telegram update object from webhook/polling
                 Format: {
                     'update_id': int,
@@ -72,7 +72,6 @@ class TelegramUpdateHandler:
             None
             
         Raises:
-            Bot.DoesNotExist: If bot not found (logged, not raised to caller)
             Exception: Any database or Telegram API errors (logged)
             
         Side Effects:
@@ -85,7 +84,7 @@ class TelegramUpdateHandler:
             >>> # From telegram_poller task
             >>> for update in updates:
             ...     try:
-            ...         TelegramUpdateHandler.handle_update(str(bot.id), update)
+            ...         TelegramUpdateHandler.handle_update(bot, update)
             ...         r.set(poll_offset_key, update['update_id'])
             ...     except Exception as e:
             ...         logger.exception(f"Error handling update: {e}")
@@ -105,15 +104,6 @@ class TelegramUpdateHandler:
             chat_id = parsed["chat_id"]
             text = parsed["text"]
 
-            # Lookup bot
-            try:
-                bot = Bot.objects.get(id=bot_id)
-            except Bot.DoesNotExist:
-                logger.error(
-                    CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
-                )
-                raise
-
             # Update chat_id if not already set (first time receiving message)
             if not bot.telegram_chat_id:
                 bot.telegram_chat_id = str(chat_id)
@@ -132,15 +122,13 @@ class TelegramUpdateHandler:
             telegram_client = TelegramClientManager.create_client(bot)
             telegram_client.send_typing_action()
 
-            # Queue for processing
+            # Queue for processing on default worker
             process_inbound_message.apply_async(
+                queue="default",
                 kwargs={"bot_id": str(bot.id), "msg_id": str(message.id)}
             )
 
             logger.info(f"Queued message {message.id} for processing")
 
-        except Bot.DoesNotExist:
-            # Already logged above
-            pass
         except Exception as e:
             logger.error("Failed to handle inbound update", exc_info=True)
