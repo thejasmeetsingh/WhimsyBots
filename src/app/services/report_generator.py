@@ -1,9 +1,12 @@
 """Report generator service"""
 
 import logging
+import asyncio
 
 from django.utils import timezone
 
+from app.services.tool_executor import MCPToolsBuilder
+from app.services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
 from app.models import Bot, Ollama
 from app.config import CeleryConfig
@@ -47,24 +50,25 @@ class ReportGeneratorService:
         try:
             self.telegram_client.send_typing_action()
 
+            # Build tools from servers
+            tools_config = asyncio.run(
+                MCPToolsBuilder.build_tools_from_servers(self.bot.mcp_servers)
+            )
+
             # Get conversation history
             history = convert_messages_to_ollama_format(
                 messages=self.bot.messages.order_by("created_at").all(),
                 system_prompt=CeleryConfig.REPORT_GENERATION_PROMPT
             )
 
-            # Generate report
-            response = self.ollama_client.chat(
+            # Run tool calling loop to generate report
+            report_html = run_tool_calling_loop(
+                ollama_client=self.ollama_client,
                 model=self.model,
-                messages=history,
-                options={
-                    "temperature": self.ollama.temperature,
-                    "num_ctx": self.ollama.num_ctx,
-                    "num_predict": self.ollama.num_predict
-                }
+                history=history,
+                tools_config=tools_config,
+                ollama=self.ollama,
             )
-
-            report_html = response.get("message", "")
 
             # Convert to PDF and send
             pdf_bytes = generate_pdf(report_html)
