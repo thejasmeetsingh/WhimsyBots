@@ -113,17 +113,15 @@ class ToolExecutor:
         """
 
         tool_name = tool_call.get("name")
-        tool_description = tool_call.get("description")
 
         for tool in self.tools:
             tool_info = tool.tool.get("function", {})
-            if (tool_info.get("name") == tool_name and
-                tool_info.get("description") == tool_description):
+            if tool_info.get("name") == tool_name:
                 return tool
 
         return None
 
-    async def execute_tool(self, tool_config: MCPToolConfig) -> str:
+    async def execute_tool(self, tool_config: MCPToolConfig, payload: Dict[str, Any] | None = None) -> str:
         """
         Execute an MCP tool and return the result.
 
@@ -138,7 +136,7 @@ class ToolExecutor:
         """
 
         try:
-            response = await mcp_client(tool_config.get_transport(), tool_config.config)
+            response = await mcp_client(tool_config.get_transport(), tool_config.config, payload)
 
             if response.get("isError"):
                 logger.warning("Tool execution returned error: %s", response)
@@ -173,7 +171,7 @@ class ToolExecutor:
             return None
 
         try:
-            result = asyncio.run(self.execute_tool(tool_config))
+            result = asyncio.run(self.execute_tool(tool_config, tool_call))
             return result
         except Exception as e:
             logger.error("Failed to execute tool call", exc_info=True)
