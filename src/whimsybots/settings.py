@@ -180,13 +180,13 @@ CELERY_BEAT_SCHEDULE = {
     # Handles scheduled app runs (journaling prompts, briefings, etc.)
     # Runs every minute — latency acceptable for scheduled outbound messages
     "master-poller": {
-        "task": "app.celery.master_poller",
+        "task": "app.tasks.master_poller",
         "schedule": crontab(minute="*"),
     },
     # Spawns per-app telegram poller tasks for all active apps
     # Runs every 3 seconds for responsive, chat-like UX
     "telegram-poller-spawner": {
-        "task": "app.celery.telegram_poller",
+        "task": "app.tasks.telegram_poller",
         "schedule": 3.0,
     },
 }
