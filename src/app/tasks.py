@@ -44,8 +44,9 @@ def telegram_poller(self):
             poll_lock_key = POLL_LOCK_KEY.format(bot_id=str(bot.id))
             poll_offset_key = POLL_OFFSET_KEY.format(bot_id=str(bot.id))
 
-            # Distributed lock — 10s expiry to auto-release if worker crashes
-            lock = r.lock(poll_lock_key, timeout=10, blocking_timeout=0)
+            # Distributed lock — 30s expiry (must exceed getUpdates timeout of 20s + buffer)
+            # to auto-release if worker crashes
+            lock = r.lock(poll_lock_key, timeout=30, blocking_timeout=0)
             if not lock.acquire(blocking=False):
                 logger.debug("telegram_poller: another worker is already polling, skipping")
                 return
