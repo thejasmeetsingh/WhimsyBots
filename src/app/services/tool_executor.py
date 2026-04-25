@@ -44,7 +44,7 @@ class MCPToolsBuilder:
 
         tools = []
 
-        for server in mcp_servers.filter(is_active=True):
+        async for server in mcp_servers.filter(is_active=True):
             config = MCPToolsBuilder._build_server_config(server)
             transport_type = MCPToolsBuilder._get_transport_type(server)
 

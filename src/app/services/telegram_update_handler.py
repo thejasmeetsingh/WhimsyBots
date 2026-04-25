@@ -9,6 +9,7 @@ of concerns between task definitions and business logic.
 import logging
 from typing import Dict, Any
 
+from app.choices import MessageRole
 from app.models import Bot, Message
 from app.config import CeleryConfig
 from app.managers import TelegramClientManager
@@ -91,8 +92,8 @@ class TelegramUpdateHandler:
             ...         break
         """
 
-        # Import here to avoid circular dependencies (celery.py imports this service)
-        from app.celery import process_inbound_message
+        # Import here to avoid circular dependencies (tasks.py imports this service)
+        from app.tasks import process_inbound_message
 
         try:
             # Parse Telegram update
@@ -122,7 +123,7 @@ class TelegramUpdateHandler:
             # Create message record
             message = Message.objects.create(
                 bot=bot,
-                role="user",
+                role=MessageRole.USER.value[0],
                 content=text,
             )
             logger.debug(f"Created message {message.id} for bot {bot.id}")
