@@ -91,7 +91,7 @@ class BotMessageProcessor:
 
             # Prepare message history
             history = convert_messages_to_ollama_format(
-                self.bot.messages.all(),
+                self.bot.messages.order_by("created_at").all(),
                 system_prompt=self.bot.system_prompt
             )
 
@@ -114,12 +114,14 @@ class BotMessageProcessor:
 
                 # Execute each tool call
                 for tool_call in response.get("tools", []):
-                    result = tool_executor.execute_tool_call_sync(tool_call)
+                    tool_call_dict = tool_call.model_dump()
+                    result = tool_executor.execute_tool_call_sync(tool_call_dict)
+
                     if result is not None:
                         history.append({
                             "role": "tool",
                             "content": result,
-                            "tool_calls": [tool_call]
+                            "tool_calls": [{"function": tool_call_dict}]
                         })
 
             return response.get("message", "")

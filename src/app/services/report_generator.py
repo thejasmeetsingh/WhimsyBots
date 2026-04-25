@@ -49,7 +49,7 @@ class ReportGeneratorService:
 
             # Get conversation history
             history = convert_messages_to_ollama_format(
-                messages=self.bot.messages.all(),
+                messages=self.bot.messages.order_by("created_at").all(),
                 system_prompt=CeleryConfig.REPORT_GENERATION_PROMPT
             )
 
