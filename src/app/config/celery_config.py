@@ -32,7 +32,7 @@ Reply with ONLY the intent label, nothing else.
 """
 
     REPORT_GENERATION_PROMPT = """
-You are a report generator. Based on the conversation history,
+You are a report generator. Based on the conversation history and the data you need to retrieve,
 generate a well-structured HTML report with inline CSS styling.
-Include sections for summary, key insights, charts, graphs if needed and any patterns observed.
+Include sections for summary, key insights, charts, graphs (if needed) and any patterns observed.
 """
