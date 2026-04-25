@@ -176,17 +176,37 @@ logging.config.dictConfig({
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
 
+# Define queues
+CELERY_QUEUES = {
+    "beat": {"exchange": "beat", "routing_key": "beat"},
+    "default": {"exchange": "default", "routing_key": "default"},
+}
+
+# Route Beat-scheduled tasks to "beat" queue
+CELERY_TASK_ROUTES = {
+    "app.tasks.master_poller": {"queue": "beat"},
+    "app.tasks.telegram_poller": {"queue": "beat"},
+    # All other tasks (process_inbound_message, generate_report, etc.) go to 'default' queue
+}
+
+# Default queue for unmapped tasks
+CELERY_DEFAULT_QUEUE = "default"
+CELERY_DEFAULT_EXCHANGE = "default"
+CELERY_DEFAULT_ROUTING_KEY = "default"
+
 CELERY_BEAT_SCHEDULE = {
     # Handles scheduled app runs (journaling prompts, briefings, etc.)
     # Runs every minute — latency acceptable for scheduled outbound messages
     "master-poller": {
         "task": "app.tasks.master_poller",
         "schedule": crontab(minute="*"),
+        "options": {"queue": "beat"},
     },
     # Spawns per-app telegram poller tasks for all active apps
     # Runs every 3 seconds for responsive, chat-like UX
     "telegram-poller-spawner": {
         "task": "app.tasks.telegram_poller",
         "schedule": 3.0,
+        "options": {"queue": "beat"},
     },
 }
