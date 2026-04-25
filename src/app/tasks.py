@@ -27,47 +27,56 @@ logger = logging.getLogger(__name__)
 
 
 @celery.task(bind=True, max_retries=3)
-def telegram_poller():
+def telegram_poller(self):
     """
     Polls Telegram for new messages and dispatches them.
       - Offset is persisted in Redis so it survives worker restarts.
       - A Redis lock ensures only one instance runs at a time across all workers.
     """
 
-    r = redis.from_url(settings.CELERY_BROKER_URL)
+    try:
+        r = redis.from_url(settings.CELERY_BROKER_URL)
 
-    # Fetch active bots
-    bots = Bot.objects.filter(is_active=True, telegram_chat_id__isnull=False)
+        # Fetch active bots
+        bots = Bot.objects.filter(is_active=True)
 
-    for bot in bots:
-        poll_lock_key = POLL_LOCK_KEY.format(bot_id=str(bot.id))
-        poll_offset_key = POLL_OFFSET_KEY.format(bot_id=str(bot.id))
+        for bot in bots:
+            poll_lock_key = POLL_LOCK_KEY.format(bot_id=str(bot.id))
+            poll_offset_key = POLL_OFFSET_KEY.format(bot_id=str(bot.id))
 
-        # Distributed lock — 10s expiry to auto-release if worker crashes
-        lock = r.lock(poll_lock_key, timeout=10, blocking_timeout=0)
-        if not lock.acquire(blocking=False):
-            logger.debug("telegram_poller: another worker is already polling, skipping")
-            return
+            # Distributed lock — 10s expiry to auto-release if worker crashes
+            lock = r.lock(poll_lock_key, timeout=10, blocking_timeout=0)
+            if not lock.acquire(blocking=False):
+                logger.debug("telegram_poller: another worker is already polling, skipping")
+                return
 
-        try:
-            # Retreive offset from redis or 0
-            offset = int(r.get(poll_offset_key) or 0)
+            try:
+                # Retreive offset from redis or 0
+                offset = int(r.get(poll_offset_key) or 0)
 
-            # Fetch messages for bot
-            telegram_client = TelegramClientManager.create_client(bot)
-            updates = telegram_client.get_updates(offset=offset + 1)
+                # Fetch messages for bot
+                telegram_client = TelegramClientManager.create_client(bot)
+                updates = telegram_client.get_updates(offset=offset + 1)
 
-            for update in updates:
-                try:
-                    TelegramUpdateHandler.handle_update(str(bot.id), update)
-                    # Persist offset immediately after each successful dispatch
-                    r.set(poll_offset_key, update["update_id"])
-                except Exception as e:
-                    logger.exception(f"Error handling update {update.get('update_id')}: {e}")
-                    # Don't update offset on failure — will retry this update next poll
-                    break
-        finally:
-            lock.release()
+                logger.info(f"Received {len(updates)} updates for {bot.name} from telegram")
+
+                for update in updates:
+                    try:
+                        TelegramUpdateHandler.handle_update(str(bot.id), update)
+                        # Persist offset immediately after each successful dispatch
+                        r.set(poll_offset_key, update["update_id"])
+                    except Exception as e:
+                        logger.exception(f"Error handling update {update.get('update_id')}: {e}")
+                        # Don't update offset on failure — will retry this update next poll
+                        break
+            finally:
+                if lock.owned():
+                    lock.release()
+
+    except Exception as e:
+        logger.error("Telegram poller failed", exc_info=True)
+        # Retry after 60 seconds
+        raise self.retry(exc=e, countdown=60)
 
 
 @celery.task(bind=True, max_retries=3)
@@ -238,4 +247,3 @@ def generate_report(self, bot_id: str):
         logger.error("Failed to generate report", exc_info=True)
         # Retry with exponential backoff
         raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
