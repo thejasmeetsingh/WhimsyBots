@@ -183,8 +183,8 @@ class MCPClient:
 
     async def execute_tool(
         self,
-        tool_name: str,
-        tool_args: Optional[Dict[str, Any]] = None
+        name: str,
+        arguments: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Execute a tool on the MCP server.
@@ -192,8 +192,8 @@ class MCPClient:
         Calls a tool by name with optional arguments and returns the result.
         
         Args:
-            tool_name (str): Name of the tool to execute
-            tool_args (dict | None): Arguments to pass to the tool
+            name (str): Name of the tool to execute
+            arguments (dict | None): Arguments to pass to the tool
                 Format depends on tool's parameter schema
                 
         Returns:
@@ -221,7 +221,7 @@ class MCPClient:
         """
 
         session = await self._connect()
-        response = await session.call_tool(tool_name, tool_args)
+        response = await session.call_tool(name, arguments)
 
         return response.model_dump()
 
