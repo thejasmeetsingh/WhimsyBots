@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
+from app.choices import MessageRole
 from app.models import (
     Ollama,
     Bot,
@@ -26,7 +27,7 @@ class BaseUserFilteredAdmin(admin.ModelAdmin):
         """Filter queryset to show only objects created by the current user."""
 
         qs = super().get_queryset(request)
-        return qs.filter(bot__created_by_id=request.user.id).select_related("bot")
+        return qs.filter(bot__created_by_id=request.user.id).select_related("bot__created_by")
 
 
 class BaseReadOnlyUserFilteredAdmin(BaseUserFilteredAdmin):
@@ -239,7 +240,7 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
     Messages are read-only and cannot be created, modified, or deleted via admin.
     """
 
-    list_display = ("bot", "role", "intent", "created_at")
+    list_display = ("bot", "role", "get_sender", "intent", "created_at")
     list_filter = ("role", "intent", "created_at")
     search_fields = ("bot__name", "content")
 
@@ -248,12 +249,24 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
             "fields": (
                 "bot",
                 "role",
+                "get_sender",
                 "content",
                 "intent",
                 "created_at"
             )
         }),
     )
+
+    @admin.display(description="Sender")
+    def get_sender(self, obj=None):
+        """Display message sender name"""
+
+        if not obj:
+            return "-"
+
+        if obj.role == MessageRole.USER.value[0]:
+            return obj.bot.created_by.username
+        return obj.bot.ollama_model
 
 
 @admin.register(Log)
