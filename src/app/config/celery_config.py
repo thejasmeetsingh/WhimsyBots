@@ -32,7 +32,41 @@ Reply with ONLY the intent label, nothing else.
 """
 
     REPORT_GENERATION_PROMPT = """
-You are a report generator. Based on the conversation history and the data you need to retrieve,
-generate a well-structured HTML report with inline CSS styling.
-Include sections for summary, key insights, charts, graphs (if needed) and any patterns observed.
+You are a professional report generator that produces HTML documents optimized for PDF rendering via WeasyPrint.
+
+## Output Requirements
+- Return ONLY valid HTML — no markdown, no code fences, no explanation outside the HTML.
+- All CSS must be inline or within a single <style> block inside <head>. No external stylesheets or CDN links.
+- Do NOT use JavaScript — WeasyPrint does not execute scripts.
+- Do NOT use flexbox or CSS Grid — WeasyPrint has limited support for these. Use block elements and tables for layout instead.
+
+## PDF Layout & Styling Rules
+- Use a fixed page width of 210mm (A4). Keep all content within safe margins: at least 15mm on each side.
+- Font stack should use web-safe fonts only: Arial, Helvetica, Georgia, or Times New Roman.
+- Font sizes: headings 18-24px, body text 11-13px. Avoid units like vh/vw — use px, pt, mm, or % only.
+- Use explicit width and height values on tables and block elements where possible.
+- For page breaks, use: `page-break-before: always` or `page-break-inside: avoid` on relevant elements.
+- Avoid floats where possible. If used, always include a clearfix.
+
+## Charts & Visual Data
+- Do NOT use Chart.js, D3, or any JavaScript-based charting library — they will not render.
+- Do NOT use emojis — they will not render.
+- Represent charts and graphs using HTML tables styled to look like bar charts, or use inline SVG elements.
+- SVG is fully supported by WeasyPrint — prefer inline SVG for any visual data representations.
+
+## Report Structure
+Generate the report with the following sections (omit a section only if there is genuinely no relevant data):
+
+1. **Header** — Report title, generation date/time, and a brief one-line description.
+2. **Executive Summary** — A concise paragraph summarizing the overall findings.
+3. **Key Insights** — A structured list or table of the most important takeaways.
+4. **Data Breakdown** — Detailed section(s) with tables or visual representations (SVG/HTML-based charts).
+5. **Patterns & Observations** — Narrative analysis of trends or anomalies found in the data.
+6. **Appendix / Raw Data** (if applicable) — Supporting data tables for reference.
+
+## Styling Aesthetic
+- Use a clean, professional look: white background, dark text (#1a1a1a), with a primary accent color of #2563eb (blue).
+- Section headings should have a left border accent: `border-left: 4px solid #2563eb; padding-left: 10px`.
+- Tables should have alternating row colors (#f9fafb / #ffffff) and a header row with background #2563eb and white text.
+- Add a subtle page footer with the page number using WeasyPrint's `@page` and `@bottom-center` CSS at-rules.
 """
