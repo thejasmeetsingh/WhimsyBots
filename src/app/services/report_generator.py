@@ -5,13 +5,14 @@ import asyncio
 
 from django.utils import timezone
 
+from app.choices import MessageRole
 from app.services.tool_executor import MCPToolsBuilder
 from app.services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
-from app.models import Bot, Ollama
+from app.models import Bot, Message, Ollama
 from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
-from app.utils import convert_messages_to_ollama_format, generate_pdf
+from app.utils import convert_messages_to_ollama_format, extract_html, generate_pdf
 
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class ReportGeneratorService:
             )
 
             # Run tool calling loop to generate report
-            report_html = run_tool_calling_loop(
+            report_response = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.model,
                 history=history,
@@ -70,7 +71,14 @@ class ReportGeneratorService:
                 ollama=self.ollama,
             )
 
+            Message.objects.create(
+                bot=self.bot,
+                role=MessageRole.ASSISTANT.value[0],
+                content=report_response
+            )
+
             # Convert to PDF and send
+            report_html = extract_html(report_response)
             pdf_bytes = generate_pdf(report_html)
             filename = f"report-{self.bot.name}-{timezone.now().isoformat()}.pdf"
 
