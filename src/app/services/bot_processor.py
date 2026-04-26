@@ -37,7 +37,7 @@ class BotMessageProcessor:
         self.model = OllamaConfigManager.get_model(bot, ollama)
         self.telegram_client = TelegramClientManager.create_client(bot)
 
-    def process_message(self, message: Message) -> str:
+    def process_message(self, message: Optional[Message]) -> str:
         """
         Process a message through intent classification and tool calling.
 
@@ -52,19 +52,20 @@ class BotMessageProcessor:
         """
 
         try:
-            # Classify message intent
-            classifier = MessageIntentClassifier(self.ollama_client, self.model)
-            intent = classifier.classify(message.content)
+            if message:
+                # Classify message intent
+                classifier = MessageIntentClassifier(self.ollama_client, self.model)
+                intent = classifier.classify(message.content)
 
-            message.intent = intent
-            message.save(update_fields=["intent"])
+                message.intent = intent
+                message.save(update_fields=["intent"])
 
-            # If report request, delegate to report generator
-            if intent == MessageIntentType.REPORT.value[0]:
-                self.telegram_client.send_message(
-                    CeleryConfig.TELEGRAM_MESSAGES["REPORT_GENERATING"]
-                )
-                return "report_requested"
+                # If report request, delegate to report generator
+                if intent == MessageIntentType.REPORT.value[0]:
+                    self.telegram_client.send_message(
+                        CeleryConfig.TELEGRAM_MESSAGES["REPORT_GENERATING"]
+                    )
+                    return "report_requested"
 
             # Process message with tools
             return self._process_with_tools()
