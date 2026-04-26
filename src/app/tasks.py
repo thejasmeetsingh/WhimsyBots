@@ -170,6 +170,7 @@ def process_inbound_message(self, bot_id: str, msg_id: Optional[str] = None):
         # Initialize clients and processor
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
         processor = BotMessageProcessor(bot, ollama, ollama_client)
+        message = None
 
         # If message ID provided, process specific message
         if msg_id:
@@ -181,22 +182,19 @@ def process_inbound_message(self, bot_id: str, msg_id: Optional[str] = None):
                 )
                 return CeleryConfig.ERROR_MESSAGES["MESSAGE_NOT_FOUND"].format(msg_id=msg_id)
 
-            # Process message
-            result = processor.process_message(message)
+        # Process message
+        result = processor.process_message(message)
 
-            # Check if report was requested
-            if result == "report_requested":
-                generate_report.apply_async(
-                    queue="default",
-                    kwargs={"bot_id": str(bot.id)}
-                )
-                return "Report generation queued"
+        # Check if report was requested
+        if result == "report_requested":
+            generate_report.apply_async(
+                queue="default",
+                kwargs={"bot_id": str(bot.id)}
+            )
+            return "Report generation queued"
 
-            # Send response
-            processor.send_response(result)
-        else:
-            # Scheduled run without specific message
-            logger.info(f"Scheduled run triggered for bot: {bot.name}")
+        # Send response
+        processor.send_response(result)
 
         logger.info(f"Message processing completed for bot: {bot.name}")
         return "Processed inbound message successfully"
