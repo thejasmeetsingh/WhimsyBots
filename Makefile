@@ -10,15 +10,18 @@ help:
 	@echo "  make down               - Stop all services"
 	@echo "  make restart            - Restart all services"
 	@echo "  make restart-app        - Restart app container"
-	@echo "  make restart-celery     - Restart celery worker container"
-	@echo "  make restart-beat       - Restart celery beat container"
+	@echo "  make restart-beat-worker - Restart celery beat worker container"
+	@echo "  make restart-default-worker - Restart celery default worker container"
+	@echo "  make restart-scheduler  - Restart celery beat scheduler"
 	@echo "  make stop               - Stop services without removing containers"
 	@echo "  make start              - Start stopped services"
 	@echo "  make ps                 - Show running containers"
 	@echo "  make logs               - View logs from all services (follow mode)"
 	@echo "  make logs-app           - View app service logs"
-	@echo "  make logs-celery        - View celery worker logs"
-	@echo "  make logs-beat          - View celery beat logs"
+	@echo "  make logs-beat-worker   - View celery beat worker logs"
+	@echo "  make logs-default-worker - View celery default worker logs"
+	@echo "  make logs-scheduler     - View celery beat scheduler logs"
+	@echo "  make logs-redis         - View redis service logs"
 	@echo ""
 	@echo "Django Commands:"
 	@echo "  make shell              - Access Django shell"
@@ -57,10 +60,13 @@ restart: down up
 restart-app:
 	cd src && docker-compose restart app
 
-restart-celery:
-	cd src && docker-compose restart celery
+restart-beat-worker:
+	cd src && docker-compose restart celery_beat_worker
 
-restart-beat:
+restart-default-worker:
+	cd src && docker-compose restart celery_default_worker
+
+restart-scheduler:
 	cd src && docker-compose restart celery_beat
 
 stop:
@@ -78,11 +84,17 @@ logs:
 logs-app:
 	cd src && docker-compose logs -f app
 
-logs-celery:
-	cd src && docker-compose logs -f celery
+logs-beat-worker:
+	cd src && docker-compose logs -f celery_beat_worker
 
-logs-beat:
+logs-default-worker:
+	cd src && docker-compose logs -f celery_default_worker
+
+logs-scheduler:
 	cd src && docker-compose logs -f celery_beat
+
+logs-redis:
+	cd src && docker-compose logs -f redis
 
 # Django Commands
 shell:
@@ -124,8 +136,17 @@ test:
 app-shell:
 	cd src && docker-compose exec app /bin/sh
 
-celery-shell:
-	cd src && docker-compose exec celery /bin/sh
+beat-worker-shell:
+	cd src && docker-compose exec celery_beat_worker /bin/sh
+
+default-worker-shell:
+	cd src && docker-compose exec celery_default_worker /bin/sh
+
+scheduler-shell:
+	cd src && docker-compose exec celery_beat /bin/sh
+
+redis-shell:
+	cd src && docker-compose exec redis redis-cli
 
 # Cleanup
 clean:
