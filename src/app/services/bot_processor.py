@@ -1,10 +1,14 @@
 """Bot message processor service"""
 
 import asyncio
+import json
 import logging
+import re
+from typing import Literal
 
+from pydantic import BaseModel, ValidationError
 from clients import OllamaClient
-from app.models import Bot, Message, Ollama
+from app.models import Bot, MCPServer, Message, Ollama
 from app.choices import MessageRole
 from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
@@ -14,6 +18,11 @@ from app.utils import convert_messages_to_ollama_format
 
 
 logger = logging.getLogger(__name__)
+
+
+class StructuredOutput(BaseModel):
+    intent: Literal["J", "R", "Q", "CJ", "O"]
+    response: str
 
 
 class BotMessageProcessor:
@@ -35,7 +44,68 @@ class BotMessageProcessor:
         self.model = OllamaConfigManager.get_model(bot, ollama)
         self.telegram_client = TelegramClientManager.create_client(bot)
 
-    def process_message(self) -> str:
+    def _parse_llm_response(self, raw: str) -> StructuredOutput:
+        """
+        Validates LLM output against StructuredOutput schema.
+        Falls back gracefully if model still misbehaves despite format param.
+
+        Args:
+            raw: Raw response returned by the LLM
+
+        Returns:
+            StructuredOutput pydantic model
+        """
+
+        # Step 1: Try clean pydantic validation (happy path)
+        try:
+            result = StructuredOutput.model_validate_json(raw)
+            return result
+
+        except ValidationError:
+            pass
+
+        # Step 2: Some models still wrap in markdown despite format param
+        cleaned = raw.strip()
+        cleaned = re.sub(r"```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"```", "", cleaned)
+        cleaned = cleaned.strip()
+
+        try:
+            result = StructuredOutput.model_validate_json(cleaned)
+            return result
+
+        except ValidationError:
+            pass
+
+        # Step 3: Try extracting first JSON object from string
+        json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if json_match:
+            try:
+                result = StructuredOutput.model_validate_json(json_match.group(0))
+                return result.intent, result.response
+
+            except ValidationError:
+                # JSON found but fields don't match schema
+                # attempt manual extraction with fallback values
+                try:
+                    data = json.loads(json_match.group(0))
+                    intent = data.get("intent", "O").strip().upper()
+                    response = data.get("response", raw.strip())
+
+                    # ensure intent is valid before constructing
+                    result = StructuredOutput(
+                        intent=intent if intent in {"J", "R", "Q", "CJ", "O"} else "O",
+                        response=response if response else raw.strip(),
+                    )
+                    return result
+
+                except (json.JSONDecodeError, ValidationError):
+                    pass
+
+        result = StructuredOutput(intent="O", response=raw.strip())
+        return result
+
+    def process_message(self) -> StructuredOutput:
         """
         Process message with tool calling loop.
 
@@ -45,8 +115,9 @@ class BotMessageProcessor:
 
         try:
             # Build tools from servers
+            mcp_servers = MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
             tools_config = asyncio.run(
-                MCPToolsBuilder.build_tools_from_servers(self.bot.mcp_servers)
+                MCPToolsBuilder.build_tools_from_servers(list(mcp_servers))
             )
 
             system_prompt = CeleryConfig.DEFAULT_SYSTEM_PROMPT.format(
@@ -63,14 +134,23 @@ class BotMessageProcessor:
             )
 
             # Run tool calling loop
-            return run_tool_calling_loop(
+            response = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.model,
                 history=history,
                 tools_config=tools_config,
                 ollama=self.ollama,
+                format=StructuredOutput.model_json_schema(),
             )
-        except Exception as e:
+
+            # Validate the response strucutre
+            result = self._parse_llm_response(response)
+            return result
+
+        except ValidationError as _:
+            logger.error("Invalid response returned from the bot", exc_info=True)
+            raise
+        except Exception as _:
             logger.error("Failed to process message with tools", exc_info=True)
             raise
 
@@ -88,6 +168,6 @@ class BotMessageProcessor:
             Message.objects.create(
                 bot=self.bot, role=MessageRole.ASSISTANT.value[0], content=response
             )
-        except Exception as e:
+        except Exception as _:
             logger.error("Failed to send response", exc_info=True)
             raise
