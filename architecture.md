@@ -225,7 +225,7 @@ Runs every minute via Celery Beat.
 
 ```python
 @shared_task
-def master_poller():
+def cron_job_poller():
     now = timezone.now()
     due_bots = Bot.objects.filter(
         is_active=True,

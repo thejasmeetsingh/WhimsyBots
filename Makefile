@@ -10,16 +10,14 @@ help:
 	@echo "  make down               - Stop all services"
 	@echo "  make restart            - Restart all services"
 	@echo "  make restart-app        - Restart app container"
-	@echo "  make restart-beat-worker - Restart celery beat worker container"
-	@echo "  make restart-default-worker - Restart celery default worker container"
+	@echo "  make restart-worker     - Restart celery worker container"
 	@echo "  make restart-scheduler  - Restart celery beat scheduler"
 	@echo "  make stop               - Stop services without removing containers"
 	@echo "  make start              - Start stopped services"
 	@echo "  make ps                 - Show running containers"
 	@echo "  make logs               - View logs from all services (follow mode)"
 	@echo "  make logs-app           - View app service logs"
-	@echo "  make logs-beat-worker   - View celery beat worker logs"
-	@echo "  make logs-default-worker - View celery default worker logs"
+	@echo "  make logs-worker        - View celery worker logs"
 	@echo "  make logs-scheduler     - View celery beat scheduler logs"
 	@echo "  make logs-redis         - View redis service logs"
 	@echo ""
@@ -60,11 +58,8 @@ restart: down up
 restart-app:
 	cd src && docker-compose restart app
 
-restart-beat-worker:
-	cd src && docker-compose restart celery_beat_worker
-
-restart-default-worker:
-	cd src && docker-compose restart celery_default_worker
+restart-worker:
+	cd src && docker-compose restart celery_worker
 
 restart-scheduler:
 	cd src && docker-compose restart celery_beat
@@ -84,11 +79,8 @@ logs:
 logs-app:
 	cd src && docker-compose logs -f app
 
-logs-beat-worker:
-	cd src && docker-compose logs -f celery_beat_worker
-
-logs-default-worker:
-	cd src && docker-compose logs -f celery_default_worker
+logs-worker:
+	cd src && docker-compose logs -f celery_worker
 
 logs-scheduler:
 	cd src && docker-compose logs -f celery_beat
@@ -136,11 +128,8 @@ test:
 app-shell:
 	cd src && docker-compose exec app /bin/sh
 
-beat-worker-shell:
-	cd src && docker-compose exec celery_beat_worker /bin/sh
-
-default-worker-shell:
-	cd src && docker-compose exec celery_default_worker /bin/sh
+worker-shell:
+	cd src && docker-compose exec celery_worker /bin/sh
 
 scheduler-shell:
 	cd src && docker-compose exec celery_beat /bin/sh
