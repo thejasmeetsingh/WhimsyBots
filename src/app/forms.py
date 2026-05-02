@@ -16,19 +16,18 @@ EMPTY_MODEL_CHOICES = [EMPTY_MODEL_CHOICE]
 
 
 def fetch_ollama_models(
-    endpoint: Optional[str] = None,
-    api_key: Optional[str] = None
+    endpoint: Optional[str] = None, api_key: Optional[str] = None
 ) -> list[str]:
     """
     Fetch available models from Ollama client.
-    
+
     Args:
         endpoint: Ollama API endpoint URL
         api_key: Ollama API key for authentication
-        
+
     Returns:
         List of available model names, empty list on error
-        
+
     Raises:
         Logs errors but returns empty list on any exception
     """
@@ -36,54 +35,49 @@ def fetch_ollama_models(
     try:
         client = OllamaClient(endpoint=endpoint, api_key=api_key)
         return client.list_models()
-    except Exception as e:
+    except Exception as _:
         logger.error(
-            "Failed to fetch Ollama models from endpoint %s",
-            endpoint,
-            exc_info=True
+            "Failed to fetch Ollama models from endpoint %s", endpoint, exc_info=True
         )
         return []
 
 
 def format_model_choices(
-    models: list[str],
-    preferred_model: Optional[str] = None
+    models: list[str], preferred_model: Optional[str] = None
 ) -> list[tuple[str, str]]:
     """
     Convert model list to form choice tuples, optionally sorting with preferred model first.
-    
+
     Args:
         models: List of model names
         preferred_model: Optional model to prioritize in the list
-        
+
     Returns:
         List of tuples suitable for form ChoiceField
     """
 
     # Convert models to choice tuples
     choices = [(model, model) for model in models]
-    
+
     # Sort with preferred model first if specified
     if preferred_model and any(choice[0] == preferred_model for choice in choices):
         preferred = [choice for choice in choices if choice[0] == preferred_model]
         others = [choice for choice in choices if choice[0] != preferred_model]
         choices = preferred + others
-    
+
     return choices
 
 
 def get_model_field() -> forms.ChoiceField:
     """
     Factory function to create a standardized model selection field.
-    
+
     Returns:
         ChoiceField configured for model selection
     """
 
     return forms.ChoiceField(
-        choices=EMPTY_MODEL_CHOICES,
-        required=False,
-        help_text=DEFAULT_MODEL_HELP_TEXT
+        choices=EMPTY_MODEL_CHOICES, required=False, help_text=DEFAULT_MODEL_HELP_TEXT
     )
 
 
@@ -115,7 +109,7 @@ class OllamaForm(forms.ModelForm):
 
         endpoint = getattr(instance, "endpoint", None)
         api_key = getattr(instance, "api_key", None)
-        
+
         models = fetch_ollama_models(endpoint=endpoint, api_key=api_key)
         if models:
             self.fields["default_model"].choices = format_model_choices(models)
@@ -152,10 +146,9 @@ class BotForm(forms.ModelForm):
         endpoint = getattr(ollama_obj, "endpoint", None)
         api_key = getattr(ollama_obj, "api_key", None)
         default_model = getattr(ollama_obj, "default_model", None)
-        
+
         models = fetch_ollama_models(endpoint=endpoint, api_key=api_key)
         if models:
             self.fields["ollama_model"].choices = format_model_choices(
-                models,
-                preferred_model=default_model
+                models, preferred_model=default_model
             )

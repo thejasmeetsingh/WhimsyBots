@@ -66,19 +66,7 @@ J/Q/CJ/O - Respond normally.
 R        - Briefly acknowledge their request and let them know 
             their report is being prepared (do not generate it)
 
-Reply with ONLY this JSON, nothing else: `{{"intent": "...", "response": "..."}}`
-"""
-
-    INTENT_CLASSIFICATION_PROMPT = """
-Classify this message into one of these intents:
-- J: user is writing a journal entry or responding to a prompt
-- R: user wants a summary, report, or overview
-- Q: user is asking a specific question
-- CJ: user wants to manage his/her cron jobs
-- O: anything else
-
-Message: "{message}"
-Reply with ONLY the intent label, nothing else.
+Reply with ONLY JSON string, nothing else.
 """
 
     REPORT_GENERATION_PROMPT = """
