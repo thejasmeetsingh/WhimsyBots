@@ -1,6 +1,5 @@
 """Celery task definitions for async job processing"""
 
-import json
 import logging
 
 from django.utils import timezone
@@ -185,21 +184,19 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
         result = processor.process_message()
 
         if result:
-            payload = json.loads(result)
-
             # Kick-off intent classification process
             classify_intent.apply_async(
                 queue="default",
                 kwargs={
                     "bot_id": bot_id,
                     "msg_id": msg_id,
-                    "intent": payload["intent"],
+                    "intent": result.intent,
                 },
             )
             logger.info("Intent classify process queued")
 
             # Send response
-            processor.send_response(payload["response"])
+            processor.send_response(result.response)
 
         logger.info(f"Message processing completed for bot: {bot.name}")
         return "Processed inbound message successfully"
