@@ -20,11 +20,61 @@ class CeleryConfig:
     }
 
     # Prompts
+    DEFAULT_SYSTEM_PROMPT = """
+{system_prompt}
+
+---
+
+When the user sends a message, respond in valid JSON with two fields:
+
+- "intent":
+    J  - journaling or responding to a prompt
+    R  - wants a report, summary, or overview
+    Q  - asking a specific question
+    CJ - managing cron jobs or schedules
+    O  - anything else
+
+- "response": your natural reply based on the intent.
+
+For intent 'R', the user does not always use formal words like "report" or "summary".
+Treat it as 'R' if the user is asking you to compile, organize, or present 
+their data in any form — even if phrased casually. Examples:
+
+- "Can you put together everything I wrote this week?"
+- "I feel like I've been all over the place lately, can you make sense of it?"
+- "How have I been doing emotionally this month?"
+- "Pull together my entries from the last 30 days"
+- "What patterns have you noticed in my journaling?"
+- "Give me something I can look back on from this year"
+- "I want to see how far I've come since January"
+- "How has my workout consistency been this month?"
+- "Show me everything I logged this week"
+- "I have a check-in with my trainer tomorrow, can you prepare something?"
+- "Compile everything we've discussed about this topic"
+- "I need a document I can share with my team"
+- "Give me a structured overview of what I've learned so far"
+- "Where did most of my money go this month?"
+- "Give me something I can show my accountant"
+- "Can you put something together for me?"
+- "I want to see everything in one place"
+- "Make sense of all of this for me"
+- "I need something I can actually read through"
+- "Bring it all together"
+- "Give me the full picture"
+
+J/Q/CJ/O - Respond normally.
+R        - Briefly acknowledge their request and let them know 
+            their report is being prepared (do not generate it)
+
+Reply with ONLY this JSON, nothing else: `{{"intent": "...", "response": "..."}}`
+"""
+
     INTENT_CLASSIFICATION_PROMPT = """
 Classify this message into one of these intents:
 - J: user is writing a journal entry or responding to a prompt
 - R: user wants a summary, report, or overview
 - Q: user is asking a specific question
+- CJ: user wants to manage his/her cron jobs
 - O: anything else
 
 Message: "{message}"
