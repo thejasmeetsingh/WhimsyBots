@@ -1,8 +1,8 @@
-# Architecture & Data Models v1.0
+# Architecture & Data Models v2.0
 
 ## 1. What We're Building
 
-A self-hosted, Django-based AI agent platform where users can create and configure AI-powered "apps" (e.g. a Journaling Agent, a Research Assistant, a Daily Briefing bot) through an admin panel. Each app runs on a schedule, communicates with users via Telegram, processes replies using a local LLM (Ollama), and can generate rich PDF reports on demand.
+A self-hosted, Django-based AI agent platform where users can create and configure AI-powered "apps" (e.g. a Journaling Agent, a Research Assistant, a Daily Briefing bot) through an admin panel. Each app runs on a schedule, communicates with users via Telegram, processes replies using a local LLM (Ollama), can generate rich PDF reports on demand, and integrates with external tools via the Model Context Protocol (MCP).
 
 ---
 
@@ -70,373 +70,780 @@ Inbound message detected as report/summary request
 ## 3. Django App Structure
 
 ```
-/platform
-  /app                   ← Bot model, MCPServer, Message, Log, Ollama
-  /user                  ← Extended user model, permissions
-  /core (future)         ← shared utilities, base classes
-  /agents (future)       ← Agent logic, Ollama client, intent detection
-  /messaging (future)    ← Telegram send/receive abstraction
-  /conversations (future) ← Conversation history models
-  /reports (future)      ← PDF generation, HTML templates
-  /scheduler (future)    ← Celery tasks, master poller, bot runner
+WhimsyBots/
+  src/
+    whimsybots/          ← Django project settings, Celery config, URLs
+      settings.py
+      celery.py
+      urls.py
+      views.py
+    
+    app/                 ← Core application
+      models.py          ← All data models (Bot, Message, CronJob, Log, Ollama, MCPServer)
+      tasks.py           ← Celery tasks (polling, processing, report generation)
+      choices.py         ← Enum-based choices (roles, intents, transports)
+      validators.py      ← Custom validators (cron, transport)
+      utils.py           ← Utility functions (PDF gen, message splitting, etc.)
+      admin.py           ← Django admin configuration
+      forms.py           ← Django forms
+      config/
+        celery_config.py ← Celery configuration constants
+      managers/
+        telegram_client.py ← Telegram client manager
+        ollama_config.py   ← Ollama config manager
+      services/
+        bot_processor.py         ← Main bot message processing with tool calling
+        report_generator.py      ← PDF report generation service
+        telegram_update_handler.py ← Incoming Telegram update handler
+        tool_calling_coordinator.py ← Ollama tool calling loop
+        tool_executor.py         ← MCP tool execution
+      migrations/
+    
+    clients/               ← External API clients
+      telegram.py          ← Telegram Bot API client
+      ollama.py            ← Ollama LLM client
+      mcp.py               ← Model Context Protocol client
+    
+    static/                ← Static files (admin, martor, plugins)
+  
   manage.py
-  celery.py
-  settings.py
+  requirements.txt
+  docker-compose.yml
+  Dockerfile
+  Makefile
 ```
 
 ---
 
 ## 4. Data Models
 
-### 4.1 `user` app
+All models inherit from `BaseModel` which provides:
+- `id`: UUID primary key (auto-generated, indexed)
+- `created_at`: Timestamp of creation
+- `updated_at`: Timestamp of last update
 
-#### `User` (extends AbstractUser)
+### 4.1 Core Models
+
+#### `Ollama`
+Global Ollama LLM configuration. Only one instance should exist (enforced via admin).
+
 ```python
-class User(AbstractUser):
-    email           = models.EmailField(unique=True)
-    timezone        = models.CharField(max_length=50, default='UTC')
-    created_at      = models.DateTimeField(auto_now_add=True)
+class Ollama(BaseModel):
+    endpoint        = models.URLField(default="http://localhost:11434")
+    default_model   = models.CharField(max_length=50, null=True, blank=True)
+    api_key         = models.CharField(max_length=100, null=True, blank=True)
+    temperature     = models.FloatField(default=0.7)
+    num_ctx         = models.PositiveIntegerField(default=4096)
+    num_predict     = models.PositiveIntegerField(null=True, blank=True)
 ```
-
----
-
-### 4.2 `app` app
 
 #### `Bot`
 The central model. Every agent/bot the user creates is a Bot instance.
 
 ```python
-class Bot(models.Model):
-    created_by      = models.ForeignKey(User, on_delete=models.CASCADE)
-    name            = models.CharField(max_length=200)
-    description     = models.TextField(null=True, blank=True)
-    is_active       = models.BooleanField(default=True)
-
-    # Scheduling
-    interval_mins   = models.PositiveIntegerField(null=True, blank=True, help_text="Runs every X minutes")
-    cron_expression = models.CharField(max_length=100, null=True, blank=True, help_text="Scheduling in cron format")
-    next_run_at     = models.DateTimeField(null=True, blank=True)
-    last_run_at     = models.DateTimeField(null=True, blank=True)
-
-    # LLM config
-    ollama_model    = models.CharField(max_length=50, null=True, blank=True)
-    system_prompt   = MartorField(null=True, blank=True)  # Markdown support
-
+class Bot(BaseModel):
+    created_by          = models.ForeignKey(User, on_delete=models.CASCADE)
+    name                = models.CharField()
+    description         = models.TextField(null=True, blank=True)
+    is_active           = models.BooleanField(default=True)
+    
+    # LLM Configuration
+    ollama_model        = models.CharField(max_length=50, null=True, blank=True)
+    system_prompt       = MartorField(null=True, blank=True)  # Markdown support
+    
     # Telegram Communication
-    telegram_bot_token = models.CharField(max_length=255, unique=True)
-
-    created_at      = models.DateTimeField(auto_now_add=True)
-    updated_at      = models.DateTimeField(auto_now=True)
+    telegram_bot_token  = models.CharField(max_length=255, unique=True)
+    telegram_chat_id    = models.CharField(max_length=255, unique=True, null=True)
 ```
 
 #### `MCPServer`
-MCP servers connected to a bot for extended functionality.
+Model Context Protocol servers connected to a bot for extended functionality.
 
 ```python
-class MCPServer(models.Model):
+class MCPServer(BaseModel):
     bot         = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='mcp_servers')
     name        = models.CharField(max_length=100)
-    transport   = models.CharField(max_length=1, choices=MCPTransportType.get_values())
-    command     = models.CharField(max_length=10, null=True, blank=True, help_text="Command: python, npx, uv")
-    endpoint    = models.URLField(null=True, blank=True, help_text="Remote MCP server endpoint URL")
-    args        = ArrayField(base_field=models.CharField(max_length=500), default=list, null=True, blank=True)
-    secrets     = models.JSONField(default=dict, null=True, blank=True, help_text="Env vars or HTTP headers")
+    transport   = models.CharField(max_length=1, choices=MCPTransportType.get_values())  # 'L' or 'R'
+    command     = models.CharField(max_length=10, null=True, blank=True)  # For LOCAL: python, npx, uv
+    endpoint    = models.URLField(null=True, blank=True)  # For REMOTE: HTTPS URL
+    args        = ArrayField(base_field=models.CharField(max_length=500), default=list)
+    secrets     = models.JSONField(default=dict, null=True, blank=True)
     is_active   = models.BooleanField(default=True)
 ```
-
-
-
----
-
-### 4.3 `app` app (continued)
 
 #### `Message`
 Every message in a conversation — inbound and outbound.
 
 ```python
-class Message(models.Model):
-
-    class Role(models.TextChoices):
-        SYSTEM    = 'system'
-        USER      = 'user'           # inbound from the human
-        ASSISTANT = 'assistant'      # outbound from the LLM
-
-    class Channel(models.TextChoices):
-        TELEGRAM = 'telegram'
-
-    class IntentType(models.TextChoices):
-        JOURNAL_ENTRY    = 'journal_entry'
-        REPORT_REQUEST   = 'report_request'
-        COMMAND          = 'command'
-        QUESTION         = 'question'
-        OTHER            = 'other'
-
-    class Status(models.TextChoices):
-        PENDING   = 'pending'
-        SENT      = 'sent'
-        DELIVERED = 'delivered'
-        FAILED    = 'failed'
-        RECEIVED  = 'received'
-
+class Message(BaseModel):
     bot             = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='messages')
-    role            = models.CharField(choices=Role.get_values())
-    intent          = models.CharField(choices=IntentType.get_values())
-    content         = MartorField()  # Markdown support
-    channel         = models.CharField(choices=Channel.get_values())
-    status          = models.CharField(choices=Status.get_values(), default=Status.PENDING.value[0])
-    is_report_request = models.BooleanField(default=False)  # flagged by intent detection
-    created_at      = models.DateTimeField(auto_now_add=True)
+    role            = models.CharField(max_length=1, choices=MessageRole.get_values())  # 'S', 'U', 'A'
+    intent          = models.CharField(max_length=2, choices=MessageIntentType.get_values(), null=True, blank=True)
+    content         = models.TextField()
 ```
 
----
-
-### 4.4 `app` app (continued)
-
-#### `Ollama`
-Ollama LLM configuration.
+#### `CronJob`
+Scheduled job definition for bot execution using cron expressions.
 
 ```python
-class Ollama(models.Model):
-    endpoint        = models.URLField(default="http://localhost:11434")
-    default_model   = models.CharField(max_length=50, null=True, blank=True)
-    api_key         = models.CharField(max_length=100, null=True, blank=True)
-    temperature     = models.FloatField(default=0.7, help_text="Controls randomness in generation")
-    num_ctx         = models.PositiveIntegerField(default=4096, help_text="Context length in tokens")
-    num_predict     = models.IntegerField(default=-1, help_text="Max tokens to generate (-1 = infinite)")
+class CronJob(BaseModel):
+    bot             = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='bot_cron_jobs')
+    name            = models.CharField(max_length=100)
+    cron_expression = models.CharField(max_length=100, validators=[validate_cron_expression])
+    next_run_at     = models.DateTimeField()
+    last_run_at     = models.DateTimeField(null=True, blank=True)
+    is_active       = models.BooleanField(default=True)
 ```
 
 #### `Log`
 Audit trail for bot executions.
 
 ```python
-class Log(models.Model):
+class Log(BaseModel):
     bot             = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='bot_logs')
     is_success      = models.BooleanField(default=True)
-    error           = models.TextField(null=True, blank=True)
-    created_at      = models.DateTimeField(auto_now_add=True)
+    description     = models.TextField(null=True, blank=True)
+```
+
+### 4.2 Choice Enumerations
+
+```python
+class MessageRole(BaseChoices):
+    SYSTEM    = ('S', 'System')
+    USER      = ('U', 'User')
+    ASSISTANT = ('A', 'Assistant')
+
+class MessageIntentType(BaseChoices):
+    JOURNAL  = ('J', 'Journal Entry')
+    REPORT   = ('R', 'Report Request')
+    QUESTION = ('Q', 'Question/Query')
+    CRON_JOB = ('CJ', 'Manage Cron Jobs')
+    OTHER    = ('O', 'Other')
+
+class MCPTransportType(BaseChoices):
+    LOCAL  = ('L', 'Local')   # Stdio-based (command + args)
+    REMOTE = ('R', 'Remote')  # HTTP-based (URL + headers)
 ```
 
 ---
 
 ## 5. Celery Architecture
 
-### 5.1 Master Poller Task
-Runs every minute via Celery Beat.
+### 5.1 Queue Structure
+
+The system uses a multi-queue architecture for optimal task routing:
+
+```
+CELERY_QUEUES = {
+    "beat":    {"exchange": "beat", "routing_key": "beat"},     # Scheduled tasks
+    "default": {"exchange": "default", "routing_key": "default"} # All other tasks
+}
+```
+
+### 5.2 Scheduled Tasks (Beat Queue)
+
+#### `cron_job_poller`
+Runs every minute via Celery Beat. Checks for due cron jobs and queues them for execution.
 
 ```python
-@shared_task
+@celery.task(bind=True, max_retries=3)
 def cron_job_poller():
-    now = timezone.now()
-    due_bots = Bot.objects.filter(
-        is_active=True,
-        next_run_at__lte=now
-    ).select_related('created_by')
-
-    for bot in due_bots:
-        bot_runner.delay(bot.id)
-        bot.next_run_at = calculate_next_run(bot)
-        bot.last_run_at = now
-        bot.save(update_fields=['next_run_at', 'last_run_at'])
+    # 1. Check Ollama configuration exists
+    # 2. Find active CronJobs with next_run_at <= now
+    # 3. Queue process_inbound_message for each due job
+    # 4. Update next_run_at and last_run_at
+    # 5. Bulk update cron jobs
 ```
 
-### 5.2 Bot Runner Task
-One task per bot execution. Handles the full outbound cycle.
+**Schedule:** Every minute (`crontab(minute="*")`)
+
+### 5.3 Message Processing Tasks (Default Queue)
+
+#### `telegram_msg_handler`
+Handles incoming Telegram updates (webhook or polling).
 
 ```python
-@shared_task
-def bot_runner(bot_id):
-    bot = Bot.objects.get(id=bot_id)
-    telegram_client = TelegramClient(token=bot.telegram_bot_token, chat_id=None)
-
-    # 1. Load bot + message history
-    # 2. Build LLM context (system prompt + recent messages)
-    # 3. Call Ollama → get response
-    # 4. Send Telegram message via TelegramClient.send_message()
-    # 5. Store outbound Message to DB
-    # 6. Log to Log DB
+@celery.task(bind=True, max_retries=3)
+def telegram_msg_handler(bot_token: str, update: dict):
+    # 1. Fetch bot by token
+    # 2. Call TelegramUpdateHandler.handle_update()
+    # 3. Retry on failure
 ```
 
-### 5.3 Telegram Message Consumer
-Polls Telegram API for incoming messages.
+#### `process_inbound_message`
+Main message processing pipeline with tool calling.
 
 ```python
-@shared_task
-def telegram_consumer():
-    # Runs every 30 seconds via Celery Beat
-    bots = Bot.objects.filter(is_active=True)
-    
-    for bot in bots:
-        telegram_client = TelegramClient(token=bot.telegram_bot_token)
-        updates = telegram_client.get_updates()
-        
-        for update in updates:
-            process_telegram_message.delay(bot.id, update)
-
-@shared_task
-def process_telegram_message(bot_id, update):
-    # 1. Extract message text and chat_id from Telegram update
-    # 2. Get bot and create/update Message record
-    # 3. Store inbound Message to DB
-    # 4. Run intent detection via Ollama
-    # 5. If report intent → report_generator.delay(bot_id, message_id)
-    # 6. Else → generate reply via Ollama → send Telegram message → store to DB
+@celery.task(bind=True, max_retries=3)
+def process_inbound_message(bot_id: str, msg_id: str):
+    # 1. Validate Ollama configuration
+    # 2. Initialize BotMessageProcessor
+    # 3. Process message with tool calling loop
+    # 4. Queue classify_intent task
+    # 5. Send response to user
 ```
 
-### 5.4 Report Generator Task
+#### `classify_intent`
+Classifies message intent and triggers report generation if needed.
 
 ```python
-@shared_task
-def report_generator(bot_id, triggered_by_message_id):
-    # 1. Load full message history for the bot
-    # 2. Call Ollama: generate HTML report
-    # 3. WeasyPrint: HTML → PDF bytes
-    # 4. Send PDF via Telegram sendDocument()
-    # 5. Store Message records to DB for PDF sent + confirmation
-    # 6. Send Telegram message confirmation
+@celery.task(bind=True, max_retries=3)
+def classify_intent(bot_id: str, msg_id: str, intent: str):
+    # 1. Update Message.intent field
+    # 2. If intent == REPORT: queue generate_report task
 ```
+
+#### `generate_report`
+Generates PDF report from conversation history.
+
+```python
+@celery.task(bind=True, max_retries=3)
+def generate_report(bot_id: str):
+    # 1. Initialize ReportGeneratorService
+    # 2. Generate HTML report via LLM
+    # 3. Convert HTML to PDF
+    # 4. Send PDF via Telegram send_document()
+```
+
+#### `setup_bot_webhook`
+Sets up Telegram webhook for a bot (used during bot activation).
+
+```python
+@celery.task(bind=True, max_retries=3)
+def setup_bot_webhook(bot_id: str):
+    # 1. Fetch bot configuration
+    # 2. Construct webhook URL
+    # 3. Register webhook with Telegram API
+```
+
+### 5.4 Retry Strategy
+
+All tasks use exponential backoff retry:
+- **Max retries:** 3
+- **Backoff:** 60s, 120s, 240s (60 × 2^retry_count)
 
 ---
 
 ## 6. Telegram Integration
 
-### 6.1 Telegram Client Setup
-The `TelegramClient` class wraps the Telegram Bot API for easy integration:
+### 6.1 Communication Modes
+
+**Webhook (Recommended):** Telegram pushes updates to `/webhook/{bot_token}/` endpoint
+
+### 6.2 Telegram Client
+
+Located in `clients/telegram.py`:
 
 ```python
-# app/telegram.py
 class TelegramClient:
-    def __init__(self, token: str, chat_id: str | None = None):
-        self.chat_id = chat_id
+    def __init__(self, token: str, chat_id: str = None):
         self.base_url = f"https://api.telegram.org/bot{token}"
+        self.chat_id = chat_id
     
     def send_message(self, text: str, parse_mode: str = "Markdown") -> dict:
-        # Sends text message via Telegram API
-        # Automatically chunks long messages
-        pass
+        # Auto-splits messages > 4096 chars
+        # Supports Markdown, HTML, or plain text
     
     def send_document(self, file_bytes: bytes, filename: str, caption: str = "") -> dict:
-        # Sends file (PDF, etc.) via Telegram API
-        pass
+        # Sends PDF or other files
+    
+    def send_typing_action(self) -> dict:
+        # Shows "typing..." indicator
+    
+    def set_webhook(self, url: str, allowed_updates: list) -> dict:
+        # Registers webhook with Telegram
     
     def get_updates(self, offset: int = 0, timeout: int = 20) -> list:
-        # Polls Telegram for new messages
-        pass
+        # Polls for new messages (polling mode)
 ```
 
-### 6.2 Outbound Messages — Telegram sendMessage
+### 6.3 Telegram Client Manager
+
+Abstraction layer for creating clients:
+
 ```python
-# Usage in bot_runner task:
-telegram_client = TelegramClient(token=bot.telegram_bot_token, chat_id=user_chat_id)
-result = telegram_client.send_message(text=response_text)
+class TelegramClientManager:
+    @staticmethod
+    def create_client(bot) -> TelegramClient:
+        return TelegramClient(bot.telegram_bot_token, bot.telegram_chat_id)
 ```
 
-### 6.3 Inbound Messages — Telegram getUpdates Polling
-Celery task polls Telegram API every 30 seconds:
+### 6.4 Update Handler
+
+Service for processing incoming updates:
+
 ```python
-# Usage in telegram_consumer task:
-telegram_client = TelegramClient(token=bot.telegram_bot_token)
-updates = telegram_client.get_updates(offset=last_known_offset)
-# Process each update...
+class TelegramUpdateHandler:
+    @staticmethod
+    def handle_update(bot: Bot, update: dict):
+        # 1. Parse update (extract message_id, chat_id, text)
+        # 2. Update bot.telegram_chat_id if not set
+        # 3. Create Message record (role=USER)
+        # 4. Send typing action
+        # 5. Queue process_inbound_message task
 ```
 
-### 6.4 Reports — Telegram sendDocument
-```python
-# Usage in report_generator task:
-telegram_client = TelegramClient(token=bot.telegram_bot_token, chat_id=user_chat_id)
-result = telegram_client.send_document(file_bytes=pdf_bytes, filename="report.pdf", caption="Your report")
+### 6.5 Message Flow
+
+#### Inbound (User → Bot)
+```
+Telegram User Message
+  → Webhook/Polling
+  → TelegramUpdateHandler.handle_update()
+  → Message saved to DB (role=USER)
+  → Typing indicator sent
+  → process_inbound_message task queued
+  → BotMessageProcessor processes with tools
+  → Response sent via TelegramClient.send_message()
+  → Response saved to DB (role=ASSISTANT)
+  → classify_intent task queued
+  → If REPORT intent: generate_report task queued
+```
+
+#### Outbound (Scheduled Bot Message)
+```
+Celery Beat (every minute)
+  → cron_job_poller finds due CronJobs
+  → process_inbound_message queued (msg_id=None)
+  → BotMessageProcessor builds context
+  → Tool calling loop runs
+  → Response sent via TelegramClient
 ```
 
 ---
 
 ## 7. Intent Detection
 
-Before processing any inbound SMS, Ollama classifies the user's intent:
+Intent detection happens **after** the initial message processing, in a separate Celery task (`classify_intent`). This allows the bot to respond quickly while intent-based actions (like report generation) run asynchronously.
+
+### 7.1 Intent Types
 
 ```python
-INTENT_PROMPT = """
-Classify this message into one of these intents:
-- journal_entry: user is writing a journal entry or responding to a prompt
-- report_request: user wants a summary, report, or overview
-- command: user is giving a command (!pause, !goals, etc.)
-- question: user is asking a specific question
-- other: anything else
+class MessageIntentType(BaseChoices):
+    JOURNAL  = ('J', 'Journal Entry')     # User writing/reflection
+    REPORT   = ('R', 'Report Request')    # User wants summary/PDF
+    QUESTION = ('Q', 'Question/Query')    # User asking something
+    CRON_JOB = ('CJ', 'Manage Cron Jobs') # Scheduling commands
+    OTHER    = ('O', 'Other')             # Everything else
+```
 
-Message: "{message}"
-Reply with ONLY the intent label, nothing else.
+### 7.2 Detection Flow
+
+```
+Message Processing Complete
+  → classify_intent task receives intent from processor
+  → Updates Message.intent field
+  → If intent == REPORT:
+      → generate_report task queued
+      → PDF generated and sent
+  → Task completes
+```
+
+### 7.3 Report Generation
+
+When a REPORT intent is detected:
+
+```python
+# Report generation prompt (in CeleryConfig)
+REPORT_GENERATION_PROMPT = """
+Generate a comprehensive HTML report with inline CSS from the conversation history.
+Include proper formatting, sections, and styling.
+Return ONLY the HTML content.
 """
+
+# ReportGeneratorService workflow:
+# 1. Fetch conversation history
+# 2. Build MCP tools (if any)
+# 3. Run tool calling loop with REPORT_GENERATION_PROMPT
+# 4. Extract HTML from response
+# 5. Convert to PDF via WeasyPrint
+# 6. Send via Telegram send_document()
+# 7. Save assistant message to DB
 ```
 
-This runs as a fast, low-token Ollama call before the main processing logic.
-
 ---
 
-## 8. Django Admin Configuration
+## 8. Model Context Protocol (MCP) Integration
 
-The admin panel is the primary UI. Key customizations:
+The system integrates with external tools and services via MCP, supporting both local and remote servers.
 
-- **Bot admin**: inline `MCPServer` editor on the Bot detail page
-- **Bot admin**: displays Telegram bot token, scheduling info, Ollama model config
-- **Message admin**: read-only message thread viewer (like a chat log), filterable by bot, intent, status, channel
-- **Log admin**: filterable by bot, success/failure, date — useful for debugging
-- **MCPServer admin**: transport type selector (local/remote), secrets masked with `***` in list view
+### 8.1 Architecture
 
-### Admin Permissions
-- Regular staff → can only see bots they created (`created_by`)
+```
+Bot
+  └── MCPServer (1:many)
+        └── MCPClient
+              └── Tools (discovered dynamically)
+```
 
----
+### 8.2 MCP Client
 
-## 9. Settings Structure
+Located in `clients/mcp.py`:
 
 ```python
-# settings.py (key additions)
+class MCPClient:
+    def __init__(self, transport_type: str, config: dict):
+        # transport_type: 'L' (LOCAL) or 'R' (REMOTE)
+        # config: command/args/env (local) or url/headers (remote)
+    
+    async def list_tools(self) -> list[dict]:
+        # Discovers available tools from MCP server
+        # Returns tools in Ollama function-calling format
+    
+    async def execute_tool(self, tool_name: str, args: dict) -> any:
+        # Executes a tool with given arguments
+        # Returns tool result
+    
+    async def cleanup(self):
+        # Properly closes connections
+```
 
-OLLAMA_BASE_URL = env('OLLAMA_BASE_URL', default='http://localhost:11434')
-OLLAMA_DEFAULT_MODEL = env('OLLAMA_DEFAULT_MODEL', default='auto')
+### 8.3 Tool Building
 
-CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
-CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+```python
+class MCPToolsBuilder:
+    @staticmethod
+    async def build_tools_from_servers(mcp_servers) -> List[MCPToolConfig]:
+        # Iterates through active MCP servers
+        # Connects to each server
+        # Discovers tools
+        # Returns list of MCPToolConfig
+```
 
-# Telegram (bot tokens are stored in Bot model, not settings)
-# Each bot has its own telegram_bot_token field
+### 8.4 Tool Execution
 
-# Optional: Encryption for MCPServer secrets
-ENCRYPTION_KEY = env('ENCRYPTION_KEY', default='')  # for encrypting MCPServer secrets
+```python
+class ToolExecutor:
+    def __init__(self, tools: List[MCPToolConfig]):
+        # Pre-configured with available tools
+    
+    def execute_tool_call_sync(self, tool_call: dict) -> any:
+        # Executes a single tool call
+        # Handles both LOCAL and REMOTE transports
+        # Returns result for LLM context
+```
+
+### 8.5 Transport Types
+
+#### LOCAL (Stdio-based)
+- **Use case:** Running MCP servers locally (Python scripts, npm packages)
+- **Config:** `command`, `args`, `env`
+- **Example:** `python -m mcp_server_memory`
+
+#### REMOTE (HTTP-based)
+- **Use case:** Remote MCP servers over HTTPS
+- **Config:** `url`, `headers`
+- **Example:** `https://api.example.com/mcp`
+
+### 8.6 Tool Calling Flow
+
+```
+BotMessageProcessor.process_message()
+  → MCPToolsBuilder.build_tools_from_servers()
+  → ToolExecutor initialized with tools
+  → run_tool_calling_loop():
+      → Ollama chat with tools
+      → If tools called:
+          → ToolExecutor.execute_tool_call_sync()
+          → Append tool result to history
+          → Loop continues
+      → If no tools: return final response
 ```
 
 ---
 
-## 10. Tech Stack Summary
+## 9. Django Admin Configuration
 
-| Concern | Technology |
-|---------|-----------|
-| Web framework | Django 5.x |
-| Admin UI | Django Admin (customized) |
-| Task queue | Celery 5.x |
-| Beat scheduler | django-celery-beat (DB scheduler) |
-| Message broker | Redis |
-| Database | PostgreSQL (primary) |
-| Outbound messaging | Telegram Bot API |
-| Inbound messaging | Telegram getUpdates polling |
-| LLM | Ollama (local) |
-| PDF generation | WeasyPrint |
-| Markdown editor | Martor |
-| Secret encryption | cryptography (optional) |
-| Environment config | django-environ |
-| MCP Protocol | Model Context Protocol (extensible) |
+The admin panel is the primary UI for bot configuration and monitoring.
+
+### 9.1 Key Customizations
+
+- **Bot admin:**
+  - Inline `MCPServer` editor on Bot detail page
+  - Displays Telegram bot token, scheduling info, Ollama model config
+  - Filter by active/inactive, creator
+  - UUID-based IDs displayed
+
+- **CronJob admin:**
+  - Inline editor on Bot detail page (or separate)
+  - Shows next_run_at, last_run_at, cron expression
+  - Filter by active/inactive, bot
+
+- **Message admin:**
+  - Read-only message thread viewer (like a chat log)
+  - Filterable by bot, intent, role
+  - Shows content preview
+
+- **Log admin:**
+  - Filterable by bot, success/failure, date
+  - Useful for debugging bot executions
+
+- **MCPServer admin:**
+  - Transport type selector (local/remote)
+  - Secrets masked with `***` in list view
+  - Validation for transport-specific fields
+
+- **Ollama admin:**
+  - Single instance enforcement (only one config allowed)
+  - Test connection button (future)
+
+### 9.2 Admin Permissions
+
+- **Superusers:** Full access to all bots and configurations
+- **Regular staff:** Can only see bots they created (`created_by`)
+- **Filtering:** By creator, active status, date ranges
+
+### 9.3 Martor Integration
+
+Markdown editor enabled for:
+- `Bot.system_prompt`
+- Any other long-form text fields
+
+Features:
+- Emoji support
+- Syntax highlighting
+- Preview mode
+- Bootstrap theme
 
 ---
 
-## 11. Build Phases (High Level)
+## 10. Settings Structure
 
-| Phase | Deliverable |
-|-------|-------------|
-| 1 | Django project setup, all models, admin registration, migrations |
-| 2 | Ollama client + basic LLM call working |
-| 3 | Telegram Bot setup + TelegramClient (send_message, send_document, get_updates) |
-| 4 | Master poller + bot runner Celery tasks |
-| 5 | Telegram message polling via telegram_consumer Celery task |
-| 6 | Intent detection + full conversation loop |
-| 7 | Report generation (HTML → PDF → Telegram sendDocument) |
-| 8 | Django admin polish + MCPServer configuration |
-| 9 | First real bot built on top: Journaling Bot |
-| 10 | Hardening, error handling, logging |
+### 10.1 Environment Variables
+
+```python
+# Required
+SECRET_KEY              = os.getenv("SECRET_KEY")
+DB_NAME                 = os.getenv("DB_NAME")
+DB_USER                 = os.getenv("DB_USER")
+DB_PASSWORD             = os.getenv("DB_PASSWORD")
+DB_HOST                 = os.getenv("DB_HOST")
+CELERY_BROKER_URL       = os.getenv("CELERY_BROKER_URL")      # redis://...
+CELERY_RESULT_BACKEND   = os.getenv("CELERY_RESULT_BACKEND")   # redis://...
+
+# Optional
+WEBHOOK_BASE_URL        = os.getenv("WEBHOOK_BASE_URL", "https://localhost:8000")
+```
+
+### 10.2 Celery Configuration
+
+```python
+CELERY_QUEUES = {
+    "beat":    {"exchange": "beat", "routing_key": "beat"},
+    "default": {"exchange": "default", "routing_key": "default"},
+}
+
+CELERY_TASK_ROUTES = {
+    "app.tasks.cron_job_poller": {"queue": "beat"},
+}
+
+CELERY_BEAT_SCHEDULE = {
+    "cron-job-poller": {
+        "task": "app.tasks.cron_job_poller",
+        "schedule": crontab(minute="*"),
+        "options": {"queue": "beat"},
+    },
+}
+```
+
+### 10.3 Logging Configuration
+
+JSON structured logging with custom formatter:
+
+```python
+LOGGING_CONFIG = None
+logging.config.dictConfig({
+    "version": 1,
+    "formatters": {
+        "default": {
+            "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+            "format": "%(asctime)s - %(module)s.%(funcName)s - %(name)s - %(levelname)s - %(message)s"
+        }
+    },
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {"": {"level": "INFO", "handlers": ["console"]}}
+})
+```
+
+### 10.4 Static Files
+
+```python
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "whimsybots/static")]
+STATIC_ROOT = os.path.join(BASE_DIR, "static")
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+```
+
+### 10.5 Martor Configuration
+
+```python
+MARTOR_THEME = "bootstrap"
+MARTOR_ENABLE_CONFIGS = {
+    "emoji": "true",
+    "imgur": "false",
+    "mention": "false",
+    "jquery": "true",
+    "living": "false",
+    "spellcheck": "false",
+    "hljs": "true",
+}
+```
+
+---
+
+## 11. Tech Stack Summary
+
+| Concern | Technology | Notes |
+|---------|-----------|-------|
+| **Core Framework** |
+| Web framework | Django 5.x | Python web framework |
+| Admin UI | Django Admin | Customized with inlines, filters |
+| Markdown editor | Martor | Bootstrap theme, emoji, syntax highlighting |
+| **Task Queue** |
+| Task queue | Celery 5.x | Async task processing |
+| Beat scheduler | django-celery-beat | Database-backed scheduler |
+| Message broker | Redis | Broker + result backend |
+| **Data Storage** |
+| Database | PostgreSQL | Primary data store |
+| **AI/LLM** |
+| LLM runtime | Ollama | Local LLM server |
+| LLM client | ollama Python package | Official client library |
+| Tool protocol | Model Context Protocol (MCP) | External tool integration |
+| **Communication** |
+| Messaging | Telegram Bot API | User communication channel |
+| HTTP client | requests | For Telegram API calls |
+| **Report Generation** |
+| PDF generation | WeasyPrint | HTML to PDF conversion |
+| **Infrastructure** |
+| Containerization | Docker | Containerized deployment |
+| Process manager | Gunicorn | WSGI HTTP server |
+| Static files | WhiteNoise | Production static file serving |
+| Logging | python-json-logger | Structured JSON logging |
+| **Development** |
+| Environment | python-dotenv | Environment variable management |
+| Package manager | pip | Python dependencies |
+
+---
+
+## 12. Deployment Architecture
+
+### 12.1 Components
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Load Balancer                         │
+│              (nginx / cloud LB / traefik)               │
+└────────────────────────┬────────────────────────────────┘
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+   ┌──────▼──────┐ ┌─────▼─────┐ ┌─────▼─────┐
+   │   Django    │ │  Celery   │ │   Celery  │
+   │   (Gunicorn)│ │  Worker   │ │   Beat    │
+   │   :8000     │ │  (default)│ │  (beat)   │
+   └──────┬──────┘ └─────┬─────┘ └─────┬─────┘
+          │              │             │
+   ┌──────▼──────────────▼─────────────▼──────┐
+   │              Redis Broker                 │
+   │         (messages + results)             │
+   └──────┬───────────────────────────────────┘
+          │
+   ┌──────▼──────┐
+   │ PostgreSQL   │
+   │  Database    │
+   └─────────────┘
+```
+
+### 12.2 External Services
+
+```
+┌──────────────────┐
+│   Ollama Server  │  ← Local or remote LLM
+│  (localhost:11434)│
+└──────────────────┘
+
+┌──────────────────┐
+│  Telegram API    │  ← Cloud-based messaging
+│ api.telegram.org │
+└──────────────────┘
+
+┌──────────────────┐
+│  MCP Servers     │  ← External tools (local/remote)
+│  (various)       │
+└──────────────────┘
+```
+
+### 12.3 Docker Services
+
+```yaml
+services:
+  web:       # Django + Gunicorn
+  celery:    # Celery worker (default queue)
+  beat:      # Celery beat scheduler
+  redis:     # Message broker
+  postgres:  # Database
+  ollama:    # Optional: Local LLM (can be external)
+```
+
+---
+
+## 12. Build Status
+
+### ✅ Completed
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Django project structure | ✅ | Full setup with whimsybots config |
+| Data models | ✅ | All models with UUID primary keys |
+| Django admin | ✅ | Customized with inlines, filters |
+| Ollama client | ✅ | Full chat + tool calling support |
+| Telegram client | ✅ | send_message, send_document, typing, webhook |
+| MCP client | ✅ | Local + remote transport support |
+| Celery tasks | ✅ | All core tasks implemented |
+| Tool calling loop | ✅ | Async tool execution with Ollama |
+| Report generation | ✅ | HTML → PDF → Telegram |
+| Intent detection | ✅ | Async classification pipeline |
+| Multi-queue Celery | ✅ | beat + default queues |
+| Structured logging | ✅ | JSON logging configured |
+
+### 🚧 In Progress / Future
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Telegram polling fallback | 🔄 | Webhook primary, polling backup |
+| User model customization | ⏳ | Currently using Django default User |
+| Encryption for secrets | ⏳ | MCPServer.secrets currently plaintext |
+| REST API | ⏳ | Future: DRF or Django Ninja |
+| Web UI (beyond admin) | ⏳ | Future: User-facing dashboard |
+| First production bot | ⏳ | Journaling Bot template |
+| Monitoring/observability | ⏳ | Metrics, tracing, alerting |
+| Rate limiting | ⏳ | Telegram API rate limit handling |
+| Message chunking optimization | ⏳ | Smart splitting for long responses |
+
+---
+
+## 13. Key Design Decisions
+
+### 13.1 UUID Primary Keys
+- **Why:** Security through obscurity, distributed system friendly
+- **Trade-off:** Slightly larger indexes, less human-readable
+
+### 13.2 Async Tool Calling
+- **Why:** MCP client requires async/await for stdio/HTTP connections
+- **Implementation:** `asyncio.run()` in synchronous Celery tasks
+
+### 13.3 Separate Intent Classification
+- **Why:** Fast response time, async report generation
+- **Flow:** Process → Respond → Classify → Act (if needed)
+
+### 13.4 Multi-Queue Celery
+- **Why:** Isolate beat scheduling from worker processing
+- **Benefit:** Prevents worker overload from affecting scheduler
+
+### 13.5 Service Layer Pattern
+- **Why:** Clean separation of concerns, testability
+- **Structure:** Tasks → Services → Clients → External APIs
+
+### 13.6 Tool Calling Abstraction
+- **Why:** Unified interface for MCP tools regardless of transport
+- **Benefit:** Easy to add new MCP servers without code changes
