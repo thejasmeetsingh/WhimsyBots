@@ -48,7 +48,7 @@ class MCPToolsBuilder:
 
         tools = []
 
-        async for server in mcp_servers.filter(is_active=True):
+        for server in mcp_servers:
             config = MCPToolsBuilder._build_server_config(server)
             transport_type = MCPToolsBuilder._get_transport_type(server)
 
@@ -60,7 +60,7 @@ class MCPToolsBuilder:
                             tool=tool, config=config, transport_type=transport_type
                         )
                     )
-            except Exception as e:
+            except Exception as _:
                 logger.error(
                     "Failed to load tools from MCP server %s",
                     server.name,
@@ -155,7 +155,7 @@ class ToolExecutor:
                     result_parts.append(text)
 
             return "\n\n".join(result_parts) if result_parts else ""
-        except Exception as e:
+        except Exception as _:
             logger.error("Tool execution failed", exc_info=True)
             raise
 
@@ -178,6 +178,6 @@ class ToolExecutor:
         try:
             result = asyncio.run(self.execute_tool(tool_config, tool_call))
             return result
-        except Exception as e:
+        except Exception as _:
             logger.error("Failed to execute tool call", exc_info=True)
             return CeleryConfig.ERROR_MESSAGES["TOOL_EXECUTION_FAILED"]

@@ -9,7 +9,7 @@ from app.choices import MessageRole
 from app.services.tool_executor import MCPToolsBuilder
 from app.services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
-from app.models import Bot, Message, Ollama
+from app.models import Bot, MCPServer, Message, Ollama
 from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
 from app.utils import convert_messages_to_ollama_format, extract_html, generate_pdf
@@ -52,13 +52,15 @@ class ReportGeneratorService:
             self.telegram_client.send_typing_action()
 
             # Build tools from servers
+            mcp_servers = MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
             tools_config = asyncio.run(
-                MCPToolsBuilder.build_tools_from_servers(self.bot.mcp_servers)
+                MCPToolsBuilder.build_tools_from_servers(list(mcp_servers))
             )
 
             # Get conversation history
+            messages = Message.objects.filter(bot_id=self.bot.id).order_by("created_at")
             history = convert_messages_to_ollama_format(
-                messages=self.bot.messages.order_by("created_at").all(),
+                messages,
                 system_prompt=CeleryConfig.REPORT_GENERATION_PROMPT,
             )
 
@@ -93,6 +95,6 @@ class ReportGeneratorService:
             logger.info(f"Report generated and sent for bot: {self.bot.name}")
             return f"Report generated successfully for bot: {self.bot.name}"
 
-        except Exception as e:
+        except Exception as _:
             logger.error("Failed to generate report", exc_info=True)
             raise

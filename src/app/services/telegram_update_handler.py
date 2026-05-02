@@ -85,7 +85,7 @@ class TelegramUpdateHandler:
             ...     try:
             ...         TelegramUpdateHandler.handle_update(bot, update)
             ...         r.set(poll_offset_key, update['update_id'])
-            ...     except Exception as e:
+            ...     except Exception as _:
             ...         logger.exception(f"Error handling update: {e}")
             ...         break
         """
@@ -129,5 +129,5 @@ class TelegramUpdateHandler:
 
             logger.info(f"Queued message {message.id} for processing")
 
-        except Exception as e:
+        except Exception as _:
             logger.error("Failed to handle inbound update", exc_info=True)
