@@ -11,7 +11,6 @@ from typing import Dict, Any
 
 from app.choices import MessageRole
 from app.models import Bot, Message
-from app.config import CeleryConfig
 from app.managers import TelegramClientManager
 from app.utils import parse_telegram_update
 
@@ -22,17 +21,17 @@ logger = logging.getLogger(__name__)
 class TelegramUpdateHandler:
     """
     Service for handling incoming Telegram updates.
-    
+
     Processes Telegram webhook/polling updates by:
     1. Parsing the update JSON
     2. Looking up the bot
     3. Creating message records
     4. Queuing for async processing
     5. Sending typing indicator to user
-    
+
     This keeps the bot responsive while async workers handle the heavy
     intent classification and tool calling.
-    
+
     Example:
         >>> from app.celery import process_inbound_message
         >>> TelegramUpdateHandler.handle_update(
@@ -46,15 +45,15 @@ class TelegramUpdateHandler:
     def handle_update(bot: Bot, update: Dict[str, Any]) -> None:
         """
         Handle a single incoming Telegram update.
-        
+
         Parses the update, saves the message to database, sends a typing
         indicator to the user, and queues the message for processing
         via the process_inbound_message Celery task.
-        
+
         This is a blocking operation that should complete quickly. The
         actual message processing (intent classification, tool execution)
         happens asynchronously in the Celery task.
-        
+
         Args:
             bot (Bot): Bot model instance
             update (dict): Telegram update object from webhook/polling
@@ -67,19 +66,19 @@ class TelegramUpdateHandler:
                         ...
                     }
                 }
-                
+
         Returns:
             None
-            
+
         Raises:
             Exception: Any database or Telegram API errors (logged)
-            
+
         Side Effects:
             - Creates Message record in database
             - Updates Bot.telegram_chat_id if not set
             - Sends typing indicator to Telegram
             - Queues process_inbound_message task
-            
+
         Example:
             >>> # From telegram_poller task
             >>> for update in updates:
@@ -125,7 +124,7 @@ class TelegramUpdateHandler:
             # Queue for processing on default worker
             process_inbound_message.apply_async(
                 queue="default",
-                kwargs={"bot_id": str(bot.id), "msg_id": str(message.id)}
+                kwargs={"bot_id": str(bot.id), "msg_id": str(message.id)},
             )
 
             logger.info(f"Queued message {message.id} for processing")

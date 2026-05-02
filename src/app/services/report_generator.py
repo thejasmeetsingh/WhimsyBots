@@ -59,7 +59,7 @@ class ReportGeneratorService:
             # Get conversation history
             history = convert_messages_to_ollama_format(
                 messages=self.bot.messages.order_by("created_at").all(),
-                system_prompt=CeleryConfig.REPORT_GENERATION_PROMPT
+                system_prompt=CeleryConfig.REPORT_GENERATION_PROMPT,
             )
 
             # Run tool calling loop to generate report
@@ -74,7 +74,7 @@ class ReportGeneratorService:
             Message.objects.create(
                 bot=self.bot,
                 role=MessageRole.ASSISTANT.value[0],
-                content=report_response
+                content=report_response,
             )
 
             # Convert to PDF and send
@@ -87,7 +87,7 @@ class ReportGeneratorService:
                 filename=filename,
                 caption=CeleryConfig.TELEGRAM_MESSAGES["REPORT_READY"].format(
                     bot_name=self.bot.name
-                )
+                ),
             )
 
             logger.info(f"Report generated and sent for bot: {self.bot.name}")
