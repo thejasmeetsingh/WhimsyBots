@@ -24,7 +24,11 @@ class MCPToolConfig:
     def get_transport(self) -> str:
         """Determine transport type from config"""
 
-        return MCPTransportType.REMOTE.value[0] if self.config.get("url") else MCPTransportType.LOCAL.value[0]
+        return (
+            MCPTransportType.REMOTE.value[0]
+            if self.config.get("url")
+            else MCPTransportType.LOCAL.value[0]
+        )
 
 
 class MCPToolsBuilder:
@@ -51,16 +55,16 @@ class MCPToolsBuilder:
             try:
                 mcp_tools = await mcp_client(transport_type, config)
                 for tool in mcp_tools:
-                    tools.append(MCPToolConfig(
-                        tool=tool,
-                        config=config,
-                        transport_type=transport_type
-                    ))
+                    tools.append(
+                        MCPToolConfig(
+                            tool=tool, config=config, transport_type=transport_type
+                        )
+                    )
             except Exception as e:
                 logger.error(
                     "Failed to load tools from MCP server %s",
                     server.name,
-                    exc_info=True
+                    exc_info=True,
                 )
 
         return tools
@@ -73,13 +77,10 @@ class MCPToolsBuilder:
             return {
                 "command": server.command,
                 "args": server.args,
-                "env": server.secrets
+                "env": server.secrets,
             }
         else:
-            return {
-                "url": server.endpoint,
-                "headers": server.secrets
-            }
+            return {"url": server.endpoint, "headers": server.secrets}
 
     @staticmethod
     def _get_transport_type(server) -> str:
@@ -121,7 +122,9 @@ class ToolExecutor:
 
         return None
 
-    async def execute_tool(self, tool_config: MCPToolConfig, payload: Dict[str, Any] | None = None) -> str:
+    async def execute_tool(
+        self, tool_config: MCPToolConfig, payload: Dict[str, Any] | None = None
+    ) -> str:
         """
         Execute an MCP tool and return the result.
 
@@ -136,7 +139,9 @@ class ToolExecutor:
         """
 
         try:
-            response = await mcp_client(tool_config.get_transport(), tool_config.config, payload)
+            response = await mcp_client(
+                tool_config.get_transport(), tool_config.config, payload
+            )
 
             if response.get("isError"):
                 logger.warning("Tool execution returned error: %s", response)
