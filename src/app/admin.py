@@ -2,15 +2,14 @@ from django.contrib import admin
 from django.utils.html import format_html
 
 from app.choices import MessageRole
-from app.models import (
-    Ollama,
-    Bot,
-    MCPServer,
-    Message,
-    Log
-)
+from app.models import CronJob, Ollama, Bot, MCPServer, Message, Log
 from app.forms import OllamaForm, BotForm
-from app.utils import calculate_next_run_at, get_admin_link
+from app.tasks import setup_bot_webhook
+from app.utils import get_admin_link
+
+
+admin.AdminSite.site_header = "WhimsyBots"
+admin.AdminSite.site_title = "WhimsyBots"
 
 
 # Base Admin Classes
@@ -27,7 +26,9 @@ class BaseUserFilteredAdmin(admin.ModelAdmin):
         """Filter queryset to show only objects created by the current user."""
 
         qs = super().get_queryset(request)
-        return qs.filter(bot__created_by_id=request.user.id).select_related("bot__created_by")
+        return qs.filter(bot__created_by_id=request.user.id).select_related(
+            "bot__created_by"
+        )
 
 
 class BaseReadOnlyUserFilteredAdmin(BaseUserFilteredAdmin):
@@ -77,57 +78,52 @@ class BotAdmin(admin.ModelAdmin):
     list_per_page = 20
 
     fieldsets = (
-        ("General Information", {
-            "fields": (
-                "created_by",
-                "name",
-                "description",
-                "ollama_model",
-                "is_active",
-                "created_at",
-                "last_execution_status",
-                "get_stats",
-            )
-        }),
-        ("Scheduling", {
-            "fields": ("interval_mins", "cron_expression", "next_run_at", "last_run_at")
-        }),
-        ("System Prompt", {
-            "fields": ("system_prompt",)
-        }),
-        ("Communication", {
-            "fields": ("telegram_bot_token", "telegram_chat_id")
-        })
+        (
+            "General Information",
+            {
+                "fields": (
+                    "created_by",
+                    "name",
+                    "description",
+                    "ollama_model",
+                    "is_active",
+                    "created_at",
+                    "updated_at",
+                    "last_execution_status",
+                    "get_stats",
+                )
+            },
+        ),
+        ("System Prompt", {"fields": ("system_prompt",)}),
+        ("Communication", {"fields": ("telegram_bot_token", "telegram_chat_id")}),
     )
 
     readonly_fields = (
         "created_by",
         "created_at",
-        "next_run_at",
-        "last_run_at",
+        "updated_at",
         "telegram_chat_id",
         "get_stats",
-        "last_execution_status"
+        "last_execution_status",
     )
 
     def get_queryset(self, request):
         """Optimize queryset with select_related and prefetch_related for performance."""
 
-        return super().get_queryset(request).filter(
-            created_by_id=request.user.id
-        ).select_related("created_by").prefetch_related(
-            "mcp_servers",
-            "messages",
-            "bot_logs"
+        return (
+            super()
+            .get_queryset(request)
+            .filter(created_by_id=request.user.id)
+            .select_related("created_by")
         )
 
     def _render_stats_table(self, obj):
         """
         Render the statistics table HTML for a bot.
-        
+
         Args:
             obj: Bot instance
-            
+
         Returns:
             HTML-formatted statistics table showing messages, MCP servers, and logs.
         """
@@ -187,7 +183,9 @@ class BotAdmin(admin.ModelAdmin):
             return "-"
 
         if last_log.is_success:
-            return format_html("<img src='/static/admin/img/icon-yes.svg' alt='Success'>")
+            return format_html(
+                "<img src='/static/admin/img/icon-yes.svg' alt='Success'>"
+            )
 
         return format_html(
             f"<a href='/admin/app/log/{str(last_log.id)}' target='_blank'>"
@@ -195,12 +193,35 @@ class BotAdmin(admin.ModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
-        """Set the current user as the bot creator and calculate next run time."""
+        """
+        Set the current user as the bot creator, calculate next run time,
+        and set up Telegram webhook when bot is created or token is changed.
+        """
 
+        # Associate current user with bot object
         obj.created_by = request.user
-        obj.next_run_at = calculate_next_run_at(obj.interval_mins, obj.cron_expression)
 
-        return super().save_model(request, obj, form, change)
+        # Save the object first to get the ID and persist changes
+        super().save_model(request, obj, form, change)
+
+        # Set up webhook when:
+        # 1. Creating a new bot (change=False) and telegram_bot_token is provided
+        # 2. Updating existing bot and telegram_bot_token has changed
+        should_setup_webhook = False
+
+        if not change and obj.telegram_bot_token:
+            # New bot being created with a token
+            should_setup_webhook = True
+        elif change and obj.telegram_bot_token:
+            # Existing bot - check if token changed
+            if "telegram_bot_token" in form.changed_data:
+                should_setup_webhook = True
+        print("should_setup_webhook: ", should_setup_webhook)
+        if should_setup_webhook:
+            # Queue webhook setup task
+            setup_bot_webhook.apply_async(
+                queue="default", countdown=10, kwargs={"bot_id": str(obj.id)}
+            )
 
 
 @admin.register(MCPServer)
@@ -215,21 +236,17 @@ class MCPServerAdmin(BaseUserFilteredAdmin):
     autocomplete_fields = ("bot",)
     readonly_fields = ("created_at",)
     search_fields = ("name", "bot__name")
-
-    fieldsets = (
-        (None, {
-            "fields": (
-                "bot",
-                "name",
-                "transport",
-                "command",
-                "endpoint",
-                "args",
-                "secrets",
-                "is_active",
-                "created_at"
-            )
-        }),
+    fields = (
+        "bot",
+        "name",
+        "transport",
+        "command",
+        "endpoint",
+        "args",
+        "secrets",
+        "is_active",
+        "created_at",
+        "updated_at",
     )
 
 
@@ -243,19 +260,7 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
     list_display = ("bot", "role", "get_sender", "intent", "created_at")
     list_filter = ("role", "intent", "created_at")
     search_fields = ("bot__name", "content")
-
-    fieldsets = (
-        (None, {
-            "fields": (
-                "bot",
-                "role",
-                "get_sender",
-                "content",
-                "intent",
-                "created_at"
-            )
-        }),
-    )
+    fields = ("bot", "role", "get_sender", "content", "intent", "created_at")
 
     @admin.display(description="Sender")
     def get_sender(self, obj=None):
@@ -269,6 +274,29 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
         return obj.bot.ollama_model
 
 
+@admin.register(CronJob)
+class CronJobAdmin(BaseReadOnlyUserFilteredAdmin):
+    """
+    Admin interface for viewing cron job schedules.
+    Cron jobs are read-only and cannot be created, modified, or deleted via admin.
+    Displays scheduling information including cron expressions and execution timestamps.
+    """
+
+    list_display = ("bot", "cron_expression", "is_active", "created_at")
+    list_filter = ("is_active", "created_at")
+    search_fields = ("bot__name",)
+    fields = (
+        "bot",
+        "name",
+        "cron_expression",
+        "next_run_at",
+        "last_run_at",
+        "is_active",
+        "created_at",
+        "updated_at",
+    )
+
+
 @admin.register(Log)
 class LogAdmin(BaseReadOnlyUserFilteredAdmin):
     """
@@ -279,14 +307,4 @@ class LogAdmin(BaseReadOnlyUserFilteredAdmin):
     list_display = ("bot", "is_success", "created_at")
     list_filter = ("is_success", "created_at")
     search_fields = ("bot__name", "description")
-
-    fieldsets = (
-        (None, {
-            "fields": (
-                "bot",
-                "is_success",
-                "description",
-                "created_at"
-            )
-        }),
-    )
+    fields = ("bot", "is_success", "description", "created_at")
