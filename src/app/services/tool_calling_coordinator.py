@@ -1,7 +1,7 @@
 """Tool calling coordinator for Ollama with MCP tools"""
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from clients import OllamaClient
 from app.models import Ollama
@@ -17,6 +17,7 @@ def run_tool_calling_loop(
     history: list[dict[str, Any]],
     tools_config: list,
     ollama: Ollama,
+    format: Optional[dict] = None,
 ) -> str:
     """
     Execute the tool calling loop with Ollama and MCP tools.
@@ -27,6 +28,7 @@ def run_tool_calling_loop(
         history: Message history list with role and content
         tools_config: List of tool configurations from MCPToolsBuilder
         ollama: Ollama configuration with temperature, num_ctx, num_predict
+        format (Optional): A strucutred format of the response
 
     Returns:
         Final response message from Ollama
@@ -44,6 +46,7 @@ def run_tool_calling_loop(
                 model=model,
                 messages=history,
                 tools=[tool.tool for tool in tools_config],
+                format=format,
                 options={
                     "temperature": ollama.temperature,
                     "num_ctx": ollama.num_ctx,
@@ -70,6 +73,6 @@ def run_tool_calling_loop(
                     )
 
         return response.get("message", "")
-    except Exception as e:
+    except Exception as _:
         logger.error("Failed to run tool calling loop", exc_info=True)
         raise
