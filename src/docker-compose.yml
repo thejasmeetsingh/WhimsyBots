@@ -56,11 +56,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # Celery Beat Worker (handles beat queue - master_poller, telegram_poller)
-  celery_beat_worker:
+  # Celery Worker
+  celery_worker:
     build: .
-    container_name: celery_beat_worker
-    command: celery -A whimsybots worker -Q beat -l INFO
+    container_name: celery_worker
+    command: celery -A whimsybots worker -Q beat,default -l INFO
     env_file: .env
     volumes:
       - .:/app
@@ -70,20 +70,6 @@ services:
       redis:
         condition: service_healthy
 
-  # Celery Default Worker (handles default queue - all other tasks)
-  celery_default_worker:
-    build: .
-    container_name: celery_default_worker
-    command: celery -A whimsybots worker -Q default -l INFO
-    env_file: .env
-    volumes:
-      - .:/app
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-  
   # Celery Beat (scheduler)
   celery_beat:
     build: .

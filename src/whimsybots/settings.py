@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 DEBUG = False
-ALLOWED_HOSTS = ["127.0.0.1", "0.0.0.0", "localhost"]
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -184,8 +184,7 @@ CELERY_QUEUES = {
 
 # Route Beat-scheduled tasks to "beat" queue
 CELERY_TASK_ROUTES = {
-    "app.tasks.master_poller": {"queue": "beat"},
-    "app.tasks.telegram_poller": {"queue": "beat"},
+    "app.tasks.cron_job_poller": {"queue": "beat"},
     # All other tasks (process_inbound_message, generate_report, etc.) go to 'default' queue
 }
 
@@ -195,18 +194,15 @@ CELERY_DEFAULT_EXCHANGE = "default"
 CELERY_DEFAULT_ROUTING_KEY = "default"
 
 CELERY_BEAT_SCHEDULE = {
-    # Handles scheduled app runs (journaling prompts, briefings, etc.)
+    # Handles scheduled cron job runs (journaling prompts, briefings, etc.)
     # Runs every minute — latency acceptable for scheduled outbound messages
-    "master-poller": {
-        "task": "app.tasks.master_poller",
+    "cron-job-poller": {
+        "task": "app.tasks.cron_job_poller",
         "schedule": crontab(minute="*"),
         "options": {"queue": "beat"},
     },
-    # Spawns per-app telegram poller tasks for all active apps
-    # Runs every 3 seconds for responsive, chat-like UX
-    "telegram-poller-spawner": {
-        "task": "app.tasks.telegram_poller",
-        "schedule": 3.0,
-        "options": {"queue": "beat"},
-    },
 }
+
+
+# Webhook configuration
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "https://localhost:8000")
