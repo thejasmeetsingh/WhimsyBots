@@ -20,6 +20,7 @@ Example MCP Usage:
 """
 
 import uuid
+import logging
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -36,6 +37,8 @@ from cron_job.helpers import (
 )
 from cron_job.models import CronJob
 from cron_job.server import server as mcp
+
+logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
@@ -74,8 +77,16 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
         SQLAlchemyError: If database query fails
     """
 
+    logger.info(
+        {
+            "tool": "list_cron_jobs",
+            "params": {"bot_id": bot_id, "is_active": None},
+        }
+    )
+
     bot_uuid = _parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
+        logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     try:
@@ -127,8 +138,20 @@ async def create_cron_job(bot_id: str, name: str, cron_expression: str) -> str:
         SQLAlchemyError: If database operation fails
     """
 
+    logger.info(
+        {
+            "tool": "create_cron_job",
+            "params": {
+                "bot_id": bot_id,
+                "name": name,
+                "cron_expression": cron_expression,
+            },
+        }
+    )
+
     bot_uuid = _parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
+        logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     try:
@@ -200,12 +223,27 @@ async def update_cron_job(
         SQLAlchemyError: If database operation fails
     """
 
+    logger.info(
+        {
+            "tool": "update_cron_job",
+            "params": {
+                "id": id,
+                "bot_id": bot_id,
+                "name": name,
+                "cron_expression": cron_expression,
+                "is_active": is_active,
+            },
+        }
+    )
+
     job_uuid = _parse_uuid(id, "id")
     if isinstance(job_uuid, str):
+        logger.error("Invalid 'job_uuid' format")
         return job_uuid
 
     bot_uuid = _parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
+        logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     if cron_expression is not None:
@@ -280,12 +318,24 @@ async def delete_cron_job(id: str, bot_id: str) -> str:
         SQLAlchemyError: If database operation fails
     """
 
+    logger.info(
+        {
+            "tool": "update_cron_job",
+            "params": {
+                "id": id,
+                "bot_id": bot_id,
+            },
+        }
+    )
+
     job_uuid = _parse_uuid(id, "id")
     if isinstance(job_uuid, str):
+        logger.error("Invalid 'job_uuid' format")
         return job_uuid
 
     bot_uuid = _parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
+        logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     try:
