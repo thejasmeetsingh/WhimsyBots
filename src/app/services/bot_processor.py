@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ValidationError
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
-from app.choices import MessageRole
+from app.choices import MCPTransportType, MessageRole
 from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
 from app.services.tool_executor import MCPToolsBuilder
@@ -115,13 +115,27 @@ class BotMessageProcessor:
 
         try:
             # Build tools from servers
-            mcp_servers = MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
+            mcp_servers = list(
+                MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
+            )
+
+            # Add 'cron_job' as a default mcp server to the 'mcp_servers' list
+            cron_job_mcp = MCPServer(
+                name="cron_job",
+                transport=MCPTransportType.LOCAL.value[0],
+                command="python",
+                args=["-m", "cron_job"],
+            )
+
+            mcp_servers.append(cron_job_mcp)
+
             tools_config = asyncio.run(
-                MCPToolsBuilder.build_tools_from_servers(list(mcp_servers))
+                MCPToolsBuilder.build_tools_from_servers(mcp_servers)
             )
 
             system_prompt = CeleryConfig.DEFAULT_SYSTEM_PROMPT.format(
-                system_prompt=self.bot.system_prompt or "You are a helpful assistant"
+                system_prompt=self.bot.system_prompt or "You are a helpful assistant",
+                bot_id=str(self.bot.id),
             )
 
             # Fetch messages

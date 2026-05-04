@@ -23,6 +23,7 @@ class CeleryConfig:
     DEFAULT_SYSTEM_PROMPT = """
 {system_prompt}
 
+`bot_id` for cron job management: {bot_id}
 ---
 
 When the user sends a message, respond in valid JSON with two fields:
