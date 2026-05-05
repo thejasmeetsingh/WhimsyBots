@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from cron_job.server import server
+from cron_job.server import mcp
 
 
 logger = logging.getLogger(__name__)
@@ -11,4 +11,4 @@ logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     logging.info("Starting CronJob MCP server...")
-    asyncio.run(server.run())
+    asyncio.run(mcp.run_stdio_async())
