@@ -6,7 +6,9 @@ import logging
 import re
 from typing import Literal
 
+from django.conf import settings
 from pydantic import BaseModel, ValidationError
+
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.choices import MCPTransportType, MessageRole
@@ -105,6 +107,29 @@ class BotMessageProcessor:
         result = StructuredOutput(intent="O", response=raw.strip())
         return result
 
+    def get_cron_job_obj(self) -> MCPServer:
+        """
+        Create a MCPserver (temp) object for cron job
+
+        Returns:
+            MCPServer object
+        """
+
+        cron_job_mcp = MCPServer(
+            name="cron_job",
+            transport=MCPTransportType.LOCAL.value[0],
+            command="python",
+            args=["-m", "cron_job"],
+            secrets={
+                "DB_NAME": settings.DB_NAME,
+                "DB_USER": settings.DB_USER,
+                "DB_PASSWORD": settings.DB_PASSWORD,
+                "DB_HOST": settings.DB_HOST,
+            },
+        )
+
+        return cron_job_mcp
+
     def process_message(self) -> StructuredOutput:
         """
         Process message with tool calling loop.
@@ -120,13 +145,7 @@ class BotMessageProcessor:
             )
 
             # Add 'cron_job' as a default mcp server to the 'mcp_servers' list
-            cron_job_mcp = MCPServer(
-                name="cron_job",
-                transport=MCPTransportType.LOCAL.value[0],
-                command="python",
-                args=["-m", "cron_job"],
-            )
-
+            cron_job_mcp = self.get_cron_job_obj()
             mcp_servers.append(cron_job_mcp)
 
             tools_config = asyncio.run(
