@@ -73,19 +73,11 @@ def cron_job_poller(self):
 
         # Queue each bot for processing on default worker
         for job in due_jobs:
-            process_inbound_message.apply_async(
+            process_cron_job.apply_async(
                 queue="default",
-                kwargs={"bot_id": str(job.bot_id), "msg_id": None},
+                kwargs={"job_id": str(job.id)},
                 eta=job.next_run_at,
             )
-
-            # Update next run time
-            job.next_run_at = calculate_next_run_at(job.cron_expression)
-            job.last_run_at = current_dt
-
-        # Bulk update
-        if due_jobs:
-            CronJob.objects.bulk_update(due_jobs, fields=["next_run_at", "last_run_at"])
 
         logger.info("Cron job poller completed successfully")
         return "Processed due cron jobs successfully"
@@ -144,6 +136,63 @@ def setup_bot_webhook(self, bot_id: str):
     except Exception as e:
         logger.error(f"Webhook setup failed for bot {bot_id}: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=60)
+
+
+@celery.task(bind=True, max_retries=3)
+def process_cron_job(self, job_id: str):
+    """
+    Process the given cron job and update its metadata after processing
+
+    Args:
+        job_id: ID of the cron job object
+
+    Returns:
+        Status message
+
+    Raises:
+        Retries on failure with exponential backoff
+    """
+    try:
+        # Validate configuration
+        ollama = OllamaConfigManager.get_ollama_config()
+        if not ollama:
+            logger.error(CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"])
+            return CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"]
+
+        try:
+            cron_job = CronJob.objects.get(id=job_id)
+        except CronJob.DoesNotExist:
+            logger.error(
+                CeleryConfig.ERROR_MESSAGES["CRON_JOB_NOT_FOUND"].format(job_id=job_id)
+            )
+            return CeleryConfig.ERROR_MESSAGES["CRON_JOB_NOT_FOUND"].format(
+                job_id=job_id
+            )
+
+        # Initialize clients and processor
+        ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
+        processor = BotMessageProcessor(cron_job.bot, ollama, ollama_client)
+
+        # Process cron job
+        result = processor.process_cron_job(
+            name=cron_job.name, description=cron_job.description
+        )
+
+        # Send response
+        processor.send_response(result)
+
+        # Update cron job metadata
+        cron_job.next_run_at = calculate_next_run_at(cron_job.cron_expression)
+        cron_job.last_run_at = timezone.now()
+        cron_job.save(update_fields=["next_run_at", "last_run_at"])
+
+        logger.info(f"Cron job processing completed for bot: {cron_job.bot.name}")
+        return "Processed cron job successfully"
+
+    except Exception as e:
+        logger.error("Failed to process cron job", exc_info=True)
+        # Retry with exponential backoff: 60s, 300s, 900s
+        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
 
 
 @celery.task(bind=True, max_retries=3)
@@ -244,7 +293,9 @@ def classify_intent(self, bot_id: str, msg_id: str, intent: str):
             )
 
         if intent == MessageIntentType.REPORT.value[0]:
-            generate_report.apply_async(queue="default", kwargs={"bot_id": bot_id})
+            generate_report.apply_async(
+                queue="default", kwargs={"bot_id": bot_id, "msg_id": msg_id}
+            )
             logger.info("Report generation queued")
 
         return "Message classified successfully"
@@ -256,12 +307,13 @@ def classify_intent(self, bot_id: str, msg_id: str, intent: str):
 
 
 @celery.task(bind=True, max_retries=3)
-def generate_report(self, bot_id: str):
+def generate_report(self, bot_id: str, msg_id: str):
     """
     Generate a report from bot conversation history and send to user.
 
     Args:
         bot_id: ID of the bot to generate report for
+        msg_id (str): ID of the message to retreive the actual request
 
     Returns:
         Status message
@@ -286,12 +338,23 @@ def generate_report(self, bot_id: str):
             )
             return CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
 
+        # Get message
+        try:
+            message = Message.objects.get(id=msg_id)
+        except Message.DoesNotExist:
+            logger.error(
+                CeleryConfig.ERROR_MESSAGES["MESSAGE_NOT_FOUND"].format(msg_id=msg_id)
+            )
+            return CeleryConfig.ERROR_MESSAGES["MESSAGE_NOT_FOUND"].format(
+                msg_id=msg_id
+            )
+
         # Initialize clients and service
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
         generator = ReportGeneratorService(bot, ollama, ollama_client)
 
         # Generate and send report
-        result = generator.generate_and_send()
+        result = generator.generate_and_send(message.content)
 
         logger.info(f"Report generated for bot: {bot.name}")
         return result
