@@ -30,39 +30,53 @@ A self-hosted, Django-based AI agent platform where users can create and configu
 
 ### Request Flows
 
-#### Outbound (Scheduled App Run)
+#### Outbound (Scheduled Cron Job)
 ```
 Celery Beat (every minute)
-  → Master poller task checks all Bot objects
-  → Bot.next_run_at <= now? → Trigger bot_runner task(bot_id)
-  → bot_runner builds context from Message history
-  → Calls Ollama → gets response
-  → Sends message via Telegram API (TelegramClient.send_message)
-  → Stores Message to DB
-  → Updates Bot.next_run_at
+  → cron_job_poller finds active CronJobs with next_run_at <= now
+  → Queue process_cron_job task for each due job
+  → process_cron_job task:
+      → Fetches CronJob with name and description
+      → BotMessageProcessor.process_cron_job(name, description):
+          → Builds tools from bot's MCPServers + default servers (time, cron_job)
+          → Runs Ollama tool_calling_loop with CRON_JOB_PROMPT
+          → LLM executes task with tool access
+      → Response sent to user via TelegramClient.send_message()
+      → Updates CronJob.next_run_at and last_run_at
 ```
 
 #### Inbound (User Telegram Message)
 ```
 User sends message via Telegram
-  → Celery task polls Telegram API (getUpdates)
-  → Extracts message text and chat_id
-  → Matches chat_id to Bot + User
-  → Stores inbound Message to DB
-  → Checks intent: is this a report request?
-    → YES: LLM generates HTML → WeasyPrint → PDF → Telegram sendDocument
-    → NO: Normal reply processing → Ollama → Telegram sendMessage response
-  → Updates message status to SENT/DELIVERED
+  → Webhook receives update at /webhook/{bot_token}/
+  → telegram_msg_handler task queued
+  → TelegramUpdateHandler.handle_update():
+      → Stores message to DB (role=USER)
+      → Sends typing indicator
+      → Queue process_inbound_message task
+  → process_inbound_message task:
+      → BotMessageProcessor.process_message():
+          → Builds tools from bot's active MCPServers + default servers (time, cron_job)
+          → Constructs system_prompt with bot_id and timezone
+          → Runs Ollama tool_calling_loop with StructuredOutput JSON schema format
+          → LLM returns: {intent: J|R|Q|CJ|O, response: string}
+      → Stores response to DB (role=ASSISTANT, intent=classified)
+      → Sends response via TelegramClient.send_message()
+      → If intent=='R': Queue generate_report task
 ```
 
-#### Report Generation
+#### Report Generation (Async)
 ```
-Inbound message detected as report/summary request
-  → LLM confirms intent
-  → LLM generates full HTML report with inline CSS
-  → WeasyPrint converts HTML → PDF (in memory)
-  → Telegram sendDocument sends PDF as file attachment
-  → Telegram sendMessage confirmation sent: "Your report has been generated and sent above"
+Intent detected as REPORT (intent=='R')
+  → generate_report task queued
+  → ReportGeneratorService.generate_report():
+      → Fetches bot's conversation history
+      → Prompts LLM with REPORT_GENERATION_PROMPT to create HTML
+      → Extracts HTML from response (handles markdown code fences)
+      → WeasyPrint converts HTML → PDF (in memory)
+      → Sends PDF via TelegramClient.send_document()
+      → Sends confirmation message via TelegramClient.send_message()
+      → Stores assistant message to DB
 ```
 
 ---
@@ -103,6 +117,14 @@ WhimsyBots/
       telegram.py          ← Telegram Bot API client
       ollama.py            ← Ollama LLM client
       mcp.py               ← Model Context Protocol client
+    
+    cron_job/              ← Standalone Cron Job MCP Server (FastMCP)
+      __init__.py
+      __main__.py          ← Entry point (python -m cron_job)
+      server.py            ← MCP server definition with tools
+      db.py                ← Async database session management
+      models.py            ← SQLAlchemy models (mirrors app.models.CronJob)
+      helpers.py           ← Utility functions for cron parsing, validation
     
     static/                ← Static files (admin, martor, plugins)
   
@@ -178,17 +200,18 @@ Every message in a conversation — inbound and outbound.
 class Message(BaseModel):
     bot             = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='messages')
     role            = models.CharField(max_length=1, choices=MessageRole.get_values())  # 'S', 'U', 'A'
-    intent          = models.CharField(max_length=2, choices=MessageIntentType.get_values(), null=True, blank=True)
+    intent          = models.CharField(max_length=2, choices=MessageIntentType.get_values(), null=True, blank=True)  # Classified by LLM
     content         = models.TextField()
 ```
 
 #### `CronJob`
-Scheduled job definition for bot execution using cron expressions.
+Scheduled job definition for bot execution using cron expressions. Each job has a name and description that define what the bot should do when executed.
 
 ```python
 class CronJob(BaseModel):
     bot             = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='bot_cron_jobs')
-    name            = models.CharField(max_length=100)
+    name            = models.CharField(max_length=100)  # Short job label
+    description     = models.TextField()  # Detailed description of job purpose
     cron_expression = models.CharField(max_length=100, validators=[validate_cron_expression])
     next_run_at     = models.DateTimeField()
     last_run_at     = models.DateTimeField(null=True, blank=True)
@@ -250,9 +273,8 @@ Runs every minute via Celery Beat. Checks for due cron jobs and queues them for 
 def cron_job_poller():
     # 1. Check Ollama configuration exists
     # 2. Find active CronJobs with next_run_at <= now
-    # 3. Queue process_inbound_message for each due job
-    # 4. Update next_run_at and last_run_at
-    # 5. Bulk update cron jobs
+    # 3. Queue process_cron_job task for each due job
+    # 4. Exponential backoff retry on failure
 ```
 
 **Schedule:** Every minute (`crontab(minute="*")`)
@@ -260,67 +282,86 @@ def cron_job_poller():
 ### 5.3 Message Processing Tasks (Default Queue)
 
 #### `telegram_msg_handler`
-Handles incoming Telegram updates (webhook or polling).
+Handles incoming Telegram webhook updates by fetching the bot and calling TelegramUpdateHandler.
 
 ```python
 @celery.task(bind=True, max_retries=3)
 def telegram_msg_handler(bot_token: str, update: dict):
     # 1. Fetch bot by token
-    # 2. Call TelegramUpdateHandler.handle_update()
-    # 3. Retry on failure
+    # 2. Call TelegramUpdateHandler.handle_update(bot, update)
+    # 3. Stores message and queues process_inbound_message
+    # 4. Retry on failure with exponential backoff
 ```
 
 #### `process_inbound_message`
-Main message processing pipeline with tool calling.
+Main message processing pipeline with embedded intent detection via structured output.
 
 ```python
 @celery.task(bind=True, max_retries=3)
 def process_inbound_message(bot_id: str, msg_id: str):
     # 1. Validate Ollama configuration
     # 2. Initialize BotMessageProcessor
-    # 3. Process message with tool calling loop
-    # 4. Queue classify_intent task
-    # 5. Send response to user
+    # 3. BotMessageProcessor.process_message():
+    #    - Builds tools from bot's MCPServers + default servers (time, cron_job)
+    #    - Runs Ollama tool_calling_loop with StructuredOutput JSON schema
+    #    - Returns {intent: J|R|Q|CJ|O, response: string}
+    # 4. Store intent in Message.intent field
+    # 5. Send response via Telegram
+    # 6. If intent=='R': queue generate_report task
+    # 7. Retry on failure with exponential backoff
 ```
 
-#### `classify_intent`
-Classifies message intent and triggers report generation if needed.
+#### `process_cron_job`
+Processes a scheduled cron job execution.
 
 ```python
 @celery.task(bind=True, max_retries=3)
-def classify_intent(bot_id: str, msg_id: str, intent: str):
-    # 1. Update Message.intent field
-    # 2. If intent == REPORT: queue generate_report task
+def process_cron_job(job_id: str):
+    # 1. Fetch CronJob by ID with name and description
+    # 2. Validate Ollama configuration
+    # 3. Initialize BotMessageProcessor
+    # 4. BotMessageProcessor.process_cron_job(name, description):
+    #    - Builds tools from bot's MCPServers + default time server
+    #    - Runs Ollama tool_calling_loop with CRON_JOB_PROMPT
+    #    - LLM executes the task
+    # 5. Send response via Telegram
+    # 6. Update CronJob.next_run_at (via croniter) and last_run_at
+    # 7. Retry on failure with exponential backoff
 ```
 
 #### `generate_report`
-Generates PDF report from conversation history.
+Generates and sends a PDF report in response to a REPORT intent.
 
 ```python
 @celery.task(bind=True, max_retries=3)
 def generate_report(bot_id: str):
     # 1. Initialize ReportGeneratorService
-    # 2. Generate HTML report via LLM
-    # 3. Convert HTML to PDF
-    # 4. Send PDF via Telegram send_document()
+    # 2. Generate HTML report via Ollama with REPORT_GENERATION_PROMPT
+    # 3. Extract HTML from LLM response (handles markdown wrappers)
+    # 4. Convert HTML to PDF via WeasyPrint
+    # 5. Send PDF via TelegramClient.send_document()
+    # 6. Send confirmation message
+    # 7. Store bot's response message to DB
+    # 8. Retry on failure with exponential backoff
 ```
 
 #### `setup_bot_webhook`
-Sets up Telegram webhook for a bot (used during bot activation).
+Sets up Telegram webhook for a bot during activation.
 
 ```python
 @celery.task(bind=True, max_retries=3)
 def setup_bot_webhook(bot_id: str):
     # 1. Fetch bot configuration
-    # 2. Construct webhook URL
+    # 2. Construct webhook URL: {WEBHOOK_BASE_URL}/webhook/{bot_token}/
     # 3. Register webhook with Telegram API
+    # 4. Retry on failure with exponential backoff
 ```
 
 ### 5.4 Retry Strategy
 
 All tasks use exponential backoff retry:
 - **Max retries:** 3
-- **Backoff:** 60s, 120s, 240s (60 × 2^retry_count)
+- **Backoff:** 60s × 2^(retry_count) → 60s, 120s, 240s
 
 ---
 
@@ -400,65 +441,83 @@ Telegram User Message
   → If REPORT intent: generate_report task queued
 ```
 
-#### Outbound (Scheduled Bot Message)
+#### Outbound (Scheduled Cron Job)
 ```
 Celery Beat (every minute)
-  → cron_job_poller finds due CronJobs
-  → process_inbound_message queued (msg_id=None)
-  → BotMessageProcessor builds context
-  → Tool calling loop runs
-  → Response sent via TelegramClient
+  → cron_job_poller checks all active CronJobs
+  → CronJob.next_run_at <= now? → Queue process_cron_job task(job_id)
+  → process_cron_job task:
+      → Fetch CronJob with name and description
+      → BotMessageProcessor.process_cron_job(name, description):
+          → Builds tools from active MCPServers + default time server
+          → Runs tool_calling_loop with CRON_JOB_PROMPT
+          → LLM executes task with access to tools
+      → Response sent via Telegram
+      → Updates CronJob.next_run_at and last_run_at
 ```
 
 ---
 
-## 7. Intent Detection
+## 7. Intent Detection & Structured Output
 
-Intent detection happens **after** the initial message processing, in a separate Celery task (`classify_intent`). This allows the bot to respond quickly while intent-based actions (like report generation) run asynchronously.
+Intent detection is **embedded** into `BotMessageProcessor.process_message()` and returns via a structured JSON schema. This ensures intent is always available immediately without needing a separate classification task.
 
-### 7.1 Intent Types
+### 7.1 StructuredOutput Model
+
+The LLM is instructed to respond in a specific JSON format using Ollama's `format` parameter:
+
+```python
+class StructuredOutput(BaseModel):
+    intent: Literal["J", "R", "Q", "CJ", "O"]  # Intent code
+    response: str  # Natural language response to user
+```
+
+When calling Ollama, we pass `format=StructuredOutput.model_json_schema()` ensuring the LLM responds with valid JSON matching this schema.
+
+### 7.2 Intent Types
 
 ```python
 class MessageIntentType(BaseChoices):
     JOURNAL  = ('J', 'Journal Entry')     # User writing/reflection
-    REPORT   = ('R', 'Report Request')    # User wants summary/PDF
+    REPORT   = ('R', 'Report Request')    # User wants summary/PDF/compilation
     QUESTION = ('Q', 'Question/Query')    # User asking something
-    CRON_JOB = ('CJ', 'Manage Cron Jobs') # Scheduling commands
+    CRON_JOB = ('CJ', 'Manage Cron Jobs') # Scheduling commands (cron_job MCP server)
     OTHER    = ('O', 'Other')             # Everything else
 ```
 
-### 7.2 Detection Flow
+### 7.3 Classification Flow
 
 ```
-Message Processing Complete
-  → classify_intent task receives intent from processor
-  → Updates Message.intent field
-  → If intent == REPORT:
-      → generate_report task queued
-      → PDF generated and sent
-  → Task completes
+process_inbound_message task:
+  → BotMessageProcessor.process_message():
+      → Ollama receives system prompt with DEFAULT_SYSTEM_PROMPT
+      → System prompt includes instructions to respond as JSON with intent & response
+      → Ollama tool_calling_loop runs with format=StructuredOutput.model_json_schema()
+      → LLM returns: {\"intent\": \"J\", \"response\": \"...\"}
+      → Response parsed and validated by _parse_llm_response()
+      → Returns StructuredOutput object (intent + response)
+  → Intent stored in Message.intent field
+  → Response sent to user
+  → If intent=='R': generate_report task queued
 ```
 
-### 7.3 Report Generation
+### 7.4 Report Generation
 
-When a REPORT intent is detected:
+When intent==\"R\" (REPORT):
 
 ```python
-# Report generation prompt (in CeleryConfig)
-REPORT_GENERATION_PROMPT = """
-Generate a comprehensive HTML report with inline CSS from the conversation history.
-Include proper formatting, sections, and styling.
-Return ONLY the HTML content.
-"""
-
-# ReportGeneratorService workflow:
-# 1. Fetch conversation history
-# 2. Build MCP tools (if any)
-# 3. Run tool calling loop with REPORT_GENERATION_PROMPT
-# 4. Extract HTML from response
-# 5. Convert to PDF via WeasyPrint
-# 6. Send via Telegram send_document()
-# 7. Save assistant message to DB
+# generate_report task workflow:
+# 1. Fetch bot's conversation Message history
+# 2. Fetch active MCPServers for bot
+# 3. ReportGeneratorService.generate_report():
+#    - Build tools from MCPServers
+#    - Run Ollama tool_calling_loop with REPORT_GENERATION_PROMPT
+#    - LLM generates HTML with inline CSS
+#    - extract_html() parses HTML from response (handles markdown fences)
+# 4. WeasyPrint converts HTML → PDF (in memory)
+# 5. TelegramClient.send_document() sends PDF
+# 6. TelegramClient.send_message() sends confirmation
+# 7. Store assistant message to DB
 ```
 
 ---
@@ -550,6 +609,64 @@ BotMessageProcessor.process_message()
       → If no tools: return final response
 ```
 
+### 8.7 Default MCP Servers
+
+Every bot automatically includes two default MCP servers without explicit configuration:
+
+#### Time Server
+- **Purpose:** Provides current time and timezone information for LLM context
+- **Implementation:** `mcp_server_time` (PyPI package)
+- **Transport:** LOCAL (stdio-based)
+- **Command:** `python -m mcp_server_time`
+- **When Used:** Added to all bots by default in `BotMessageProcessor.get_default_mcp_servers()`
+- **Tools Available:** `get_current_time`, timezone-aware helpers
+
+#### Cron Job Manager Server
+- **Purpose:** Allows LLM to view, create, update, and delete cron jobs
+- **Implementation:** Standalone module in `src/cron_job/` with FastMCP
+- **Transport:** LOCAL (stdio-based)
+- **Command:** `python -m cron_job`
+- **Database:** Shares main PostgreSQL database (via environment secrets)
+- **When Used:** Added to message processing and cron job execution flows
+- **Tools Available:**
+  - `list_cron_jobs(bot_id, is_active=None)` — List cron jobs
+  - `create_cron_job(bot_id, name, description, cron_expression)` — Create new job
+  - `update_cron_job(id, bot_id, name?, description?, cron_expression?, is_active?)` — Update existing job
+  - `delete_cron_job(id, bot_id)` — Delete a job
+- **Example Use Case:** User asks \"Schedule a daily report at 9 AM\" → LLM calls `create_cron_job` with name=\"Daily Report\", cron_expression=\"0 9 * * *\"
+
+### 8.8 Server Instantiation
+
+```python
+# BotMessageProcessor.get_default_mcp_servers() creates temporary MCPServer objects
+# These are NOT persisted to database, but used for a single message processing cycle
+
+cron_job_mcp = MCPServer(
+    name="cron_job",
+    transport=MCPTransportType.LOCAL.value[0],
+    command="python",
+    args=["-m", "cron_job"],
+    secrets={
+        "DB_NAME": settings.DB_NAME,
+        "DB_USER": settings.DB_USER,
+        "DB_PASSWORD": settings.DB_PASSWORD,
+        "DB_HOST": settings.DB_HOST,
+    },
+)
+
+time_mcp = MCPServer(
+    name="time",
+    transport=MCPTransportType.LOCAL.value[0],
+    command="python",
+    args=["-m", "mcp_server_time"],
+)
+
+# Then mixed with bot's active MCPServers for tool discovery
+mcp_servers = list(MCPServer.objects.filter(bot_id=bot.id, is_active=True))
+default_servers = get_default_mcp_servers()
+mcp_servers.extend(list(default_servers.values()))
+```
+
 ---
 
 ## 9. Django Admin Configuration
@@ -565,8 +682,8 @@ The admin panel is the primary UI for bot configuration and monitoring.
   - UUID-based IDs displayed
 
 - **CronJob admin:**
-  - Inline editor on Bot detail page (or separate)
-  - Shows next_run_at, last_run_at, cron expression
+  - Inline editor on Bot detail page
+  - Shows name, description, cron_expression, next_run_at, last_run_at
   - Filter by active/inactive, bot
 
 - **Message admin:**
@@ -703,15 +820,20 @@ MARTOR_ENABLE_CONFIGS = {
 | Task queue | Celery 5.x | Async task processing |
 | Beat scheduler | django-celery-beat | Database-backed scheduler |
 | Message broker | Redis | Broker + result backend |
+| Async DB client | asyncpg | PostgreSQL async driver for cron_job MCP server |
 | **Data Storage** |
 | Database | PostgreSQL | Primary data store |
+| Data validation | Pydantic v2 | Type validation and structured JSON schemas |
 | **AI/LLM** |
 | LLM runtime | Ollama | Local LLM server |
 | LLM client | ollama Python package | Official client library |
 | Tool protocol | Model Context Protocol (MCP) | External tool integration |
+| MCP framework | FastMCP | Lightweight Python MCP server framework |
+| Cron utilities | croniter | Cron expression parsing and next-run calculation |
 | **Communication** |
 | Messaging | Telegram Bot API | User communication channel |
-| HTTP client | requests | For Telegram API calls |
+| HTTP client | httpx | Async HTTP client (for MCP and APIs) |
+| Legacy HTTP | requests | For Telegram API calls |
 | **Report Generation** |
 | PDF generation | WeasyPrint | HTML to PDF conversion |
 | **Infrastructure** |
@@ -794,31 +916,31 @@ services:
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Django project structure | ✅ | Full setup with whimsybots config |
-| Data models | ✅ | All models with UUID primary keys |
+| Data models | ✅ | All models with UUID primary keys + CronJob description field |
 | Django admin | ✅ | Customized with inlines, filters |
-| Ollama client | ✅ | Full chat + tool calling support |
+| Ollama client | ✅ | Full chat + tool calling with JSON schema format support |
 | Telegram client | ✅ | send_message, send_document, typing, webhook |
-| MCP client | ✅ | Local + remote transport support |
-| Celery tasks | ✅ | All core tasks implemented |
-| Tool calling loop | ✅ | Async tool execution with Ollama |
-| Report generation | ✅ | HTML → PDF → Telegram |
-| Intent detection | ✅ | Async classification pipeline |
+| MCP client | ✅ | Local + remote transport support with stdio and HTTP |
+| Celery tasks | ✅ | All core tasks: telegram_msg_handler, process_inbound_message, process_cron_job, generate_report, setup_bot_webhook |
+| Tool calling loop | ✅ | Async tool execution with Ollama via tool_calling_coordinator |
+| StructuredOutput | ✅ | Pydantic-based JSON schema for intent + response |
+| Embedded intent detection | ✅ | Intent classification integrated into process_message with JSON schema format |
+| Report generation | ✅ | HTML → PDF → Telegram (async via generate_report task) |
+| Cron job processing | ✅ | Dedicated process_cron_job task with CronJob.description support |
+| Default MCP servers | ✅ | Time server + Cron Job Manager (FastMCP) injected automatically |
+| Cron Job MCP Server | ✅ | Standalone module with list/create/update/delete tools (FastMCP) |
 | Multi-queue Celery | ✅ | beat + default queues |
 | Structured logging | ✅ | JSON logging configured |
+| Async database | ✅ | asyncpg for cron_job MCP server database access |
 
 ### 🚧 In Progress / Future
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Telegram polling fallback | 🔄 | Webhook primary, polling backup |
-| User model customization | ⏳ | Currently using Django default User |
-| Encryption for secrets | ⏳ | MCPServer.secrets currently plaintext |
-| REST API | ⏳ | Future: DRF or Django Ninja |
-| Web UI (beyond admin) | ⏳ | Future: User-facing dashboard |
-| First production bot | ⏳ | Journaling Bot template |
-| Monitoring/observability | ⏳ | Metrics, tracing, alerting |
-| Rate limiting | ⏳ | Telegram API rate limit handling |
-| Message chunking optimization | ⏳ | Smart splitting for long responses |
+| Encryption for secrets | ⏳ | MCPServer.secrets currently plaintext JSON |
+| Monitoring/observability | ⏳ | Metrics, tracing, alerting via Prometheus/Grafana |
+| Rate limiting | ⏳ | Telegram API rate limit handling per bot |
+| Message chunking optimization | ⏳ | Smart splitting for LLM responses > 4096 chars |
 
 ---
 
@@ -832,18 +954,30 @@ services:
 - **Why:** MCP client requires async/await for stdio/HTTP connections
 - **Implementation:** `asyncio.run()` in synchronous Celery tasks
 
-### 13.3 Separate Intent Classification
-- **Why:** Fast response time, async report generation
-- **Flow:** Process → Respond → Classify → Act (if needed)
+### 13.3 Embedded Intent Detection with StructuredOutput
+- **Why:** Fast response time, intent always available, reduced task overhead
+- **Flow:** Process → Detect Intent (JSON schema format) → Respond → Act (if needed)
+- **Benefit:** Single LLM call returns both intent and response; no intermediate tasks
+- **Implementation:** Ollama `format` parameter with Pydantic schema
 
-### 13.4 Multi-Queue Celery
+### 13.4 Default MCP Servers
+- **Why:** Provide core functionality (time, cron management) without manual setup
+- **Instantiation:** Temporary in-memory MCPServer objects created per message
+- **Benefit:** Always available, extensible with custom MCPServers
+
+### 13.5 Multi-Queue Celery
 - **Why:** Isolate beat scheduling from worker processing
 - **Benefit:** Prevents worker overload from affecting scheduler
 
-### 13.5 Service Layer Pattern
+### 13.6 Service Layer Pattern
 - **Why:** Clean separation of concerns, testability
 - **Structure:** Tasks → Services → Clients → External APIs
 
-### 13.6 Tool Calling Abstraction
+### 13.7 Tool Calling Abstraction
 - **Why:** Unified interface for MCP tools regardless of transport
 - **Benefit:** Easy to add new MCP servers without code changes
+
+### 13.8 CronJob with Description
+- **Why:** LLM needs context about what each scheduled job does
+- **Usage:** Description passed to `process_cron_job` in CRON_JOB_PROMPT
+- **Benefit:** LLM can execute task semantically correct without hardcoded logic
