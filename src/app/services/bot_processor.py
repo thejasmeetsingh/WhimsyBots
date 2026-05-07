@@ -107,12 +107,12 @@ class BotMessageProcessor:
         result = StructuredOutput(intent="O", response=raw.strip())
         return result
 
-    def get_default_mcp_servers(self) -> MCPServer:
+    def get_default_mcp_servers(self) -> dict[str, MCPServer]:
         """
         Create MCPServer (temp) objects for default MCP servers
 
         Returns:
-            list[MCPServer]: MCPServer objects
+            dict[str, MCPServer]: MCPServer objects
         """
 
         cron_job_mcp = MCPServer(
@@ -135,14 +135,14 @@ class BotMessageProcessor:
             args=["-m", "mcp_server_time"],
         )
 
-        return [cron_job_mcp, time_mcp]
+        return {"cron_job": cron_job_mcp, "time": time_mcp}
 
     def process_message(self) -> StructuredOutput:
         """
         Process message with tool calling loop.
 
         Returns:
-            Final response from Ollama
+            StructuredOutput: Intent and LLM Response
         """
 
         try:
@@ -153,7 +153,7 @@ class BotMessageProcessor:
 
             # Add default mcp server's to the 'mcp_servers' list
             default_servers = self.get_default_mcp_servers()
-            mcp_servers.extend(default_servers)
+            mcp_servers.extend(list(default_servers.values()))
 
             tools_config = asyncio.run(
                 MCPToolsBuilder.build_tools_from_servers(mcp_servers)
@@ -193,6 +193,57 @@ class BotMessageProcessor:
             raise
         except Exception as _:
             logger.error("Failed to process message with tools", exc_info=True)
+            raise
+
+    def process_cron_job(self, name: str, description: str) -> str:
+        """
+        Process cron job with tool calling loop.
+
+        Args:
+            name (str): Name of the cron job
+            description (str): cron job description
+
+        Returns:
+            Final response from LLM
+        """
+
+        try:
+            # Build tools from servers
+            mcp_servers = list(
+                MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
+            )
+
+            # Add default time mcp server to the 'mcp_servers' list
+            default_servers = self.get_default_mcp_servers()
+            mcp_servers.extend([default_servers["time"]])
+
+            tools_config = asyncio.run(
+                MCPToolsBuilder.build_tools_from_servers(mcp_servers)
+            )
+
+            # Run tool calling loop
+            response = run_tool_calling_loop(
+                ollama_client=self.ollama_client,
+                model=self.model,
+                history=[
+                    {
+                        "role": "user",
+                        "content": CeleryConfig.CRON_JOB_PROMPT.format(
+                            name=name, description=description
+                        ),
+                    }
+                ],
+                tools_config=tools_config,
+                ollama=self.ollama,
+            )
+
+            return response
+
+        except ValidationError as _:
+            logger.error("Invalid response returned from the bot", exc_info=True)
+            raise
+        except Exception as _:
+            logger.error("Failed to process cron job activity", exc_info=True)
             raise
 
     def send_response(self, response: str) -> None:
