@@ -41,6 +41,7 @@ class CronJob(Base):
     )
     bot_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     name = Column(String(100), nullable=False)
+    description = Column(String(5000), nullable=False)
     cron_expression = Column(String(100), nullable=False)
     next_run_at = Column(DateTime(timezone=True), nullable=False)
     last_run_at = Column(DateTime(timezone=True), nullable=True)

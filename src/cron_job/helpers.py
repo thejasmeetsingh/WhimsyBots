@@ -71,6 +71,7 @@ def _fmt_job(job: CronJob) -> str:
         f"- **ID**: `{job.id}`\n"
         f"  - **Bot ID**: `{job.bot_id}`\n"
         f"  - **Name**: {job.name}\n"
+        f"  - **Description**: {job.description}\n"
         f"  - **Cron Expression**: `{job.cron_expression}`"
     )
 
