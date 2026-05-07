@@ -33,7 +33,7 @@ def calculate_next_run_at(cron_expression: Optional[str]) -> timezone.datetime:
         datetime: Next run timestamp
 
     Example:
-        >>> next_run = calculate_next_run_at(interval_mins=None, cron_expression="0 9 * * *")
+        >>> next_run = calculate_next_run_at(cron_expression="0 9 * * *")
     """
 
     current_dt = timezone.now()
