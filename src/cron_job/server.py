@@ -57,6 +57,7 @@ Retrieves cron jobs for a given bot. Use this when the user wants to see, browse
 Creates a new cron job for a bot. Use this when the user wants to schedule a new job.
 - `bot_id` (required): The UUID of the bot.
 - `name` (required): A short, human-readable label (max 100 characters).
+- `description` (required): A detailed description of what the job does (max 5000 characters).
 - `cron_expression` (required): A valid standard 5-field cron expression (e.g. `0 9 * * 1` for every Monday at 9 AM).
 
 ### 3. `update_cron_job`
@@ -64,6 +65,7 @@ Partially updates an existing cron job. Only the fields you provide will be chan
 - `id` (required): UUID of the cron job to update.
 - `bot_id` (required): UUID of the owning bot, used to scope the lookup.
 - `name` (optional): New label for the job.
+- `description` (optional): New description for the job.
 - `cron_expression` (optional): New cron schedule. Will be validated and `next_run_at` will be recalculated automatically.
 - `is_active` (optional): Pass `true` to enable or `false` to disable the job.
 
@@ -77,6 +79,7 @@ All tools return a Markdown-formatted response containing:
 - **ID** — UUID of the cron job
 - **Bot ID** — UUID of the owning bot
 - **Name** — Label of the job
+- **Description** — What the job does
 - **Cron Expression** — The schedule in cron format
 
 Errors (invalid UUIDs, invalid cron expressions, not found, or database failures) are also returned as Markdown with a clear heading indicating the error type.
@@ -155,7 +158,9 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
 
 
 @mcp.tool()
-async def create_cron_job(bot_id: str, name: str, cron_expression: str) -> str:
+async def create_cron_job(
+    bot_id: str, name: str, description: str, cron_expression: str
+) -> str:
     """
     Create a new cron job for a bot.
 
@@ -166,6 +171,8 @@ async def create_cron_job(bot_id: str, name: str, cron_expression: str) -> str:
         bot_id (str): UUID of the bot this job belongs to
         name (str): Human-readable label for the job (max 100 chars)
             Examples: "Daily Report", "Weekly Newsletter", "Hourly Check"
+        description (str): Detailed description of what the job does (max 5000 chars)
+            Examples: "Generates and sends daily performance report", "Fetches latest data from API"
         cron_expression (str): Standard 5-field cron expression
             Format: minute hour day month weekday
             Examples:
@@ -193,6 +200,7 @@ async def create_cron_job(bot_id: str, name: str, cron_expression: str) -> str:
             "params": {
                 "bot_id": bot_id,
                 "name": name,
+                "description": description,
                 "cron_expression": cron_expression,
             },
         }
@@ -214,6 +222,7 @@ async def create_cron_job(bot_id: str, name: str, cron_expression: str) -> str:
                 id=uuid.uuid4(),
                 bot_id=bot_uuid,
                 name=name,
+                description=description,
                 cron_expression=cron_expression,
                 next_run_at=_calc_next_run(cron_expression),
                 is_active=True,
@@ -232,6 +241,7 @@ async def update_cron_job(
     id: str,
     bot_id: str,
     name: Optional[str] = None,
+    description: Optional[str] = None,
     cron_expression: Optional[str] = None,
     is_active: Optional[bool] = None,
 ) -> str:
@@ -246,6 +256,8 @@ async def update_cron_job(
         bot_id (str): UUID of the owning bot — used to scope the lookup (required)
         name (str | None): New name for the job (optional)
             Examples: "Daily Report", "Weekly Newsletter"
+        description (str | None): New description for the job (optional)
+            Examples: "Generates and sends daily performance report", "Fetches latest data from API"
         cron_expression (str | None): New cron expression (optional)
             Must be valid cron syntax if provided
             Examples: "0 9 * * *", "*/15 * * * *"
@@ -279,6 +291,7 @@ async def update_cron_job(
                 "id": id,
                 "bot_id": bot_id,
                 "name": name,
+                "description": description,
                 "cron_expression": cron_expression,
                 "is_active": is_active,
             },
@@ -305,6 +318,8 @@ async def update_cron_job(
     changes: dict = {"updated_at": datetime.now(timezone.utc)}
     if name is not None:
         changes["name"] = name
+    if description is not None:
+        changes["description"] = description
     if is_active is not None:
         changes["is_active"] = is_active
     if cron_expression is not None:
