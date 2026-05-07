@@ -38,7 +38,9 @@ def _build_db_url() -> str:
 
 
 engine = create_async_engine(_build_db_url(), pool_pre_ping=True, echo=False)
-async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine, expire_on_commit=False, class_=AsyncSession
+)
 
 
 @asynccontextmanager
@@ -51,13 +53,13 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     occurs within the context.
 
     Yields:
-        AsyncSession: An active SQLAlchemy async session.
+        AsyncSessionLocal: An active SQLAlchemy async session.
 
     Raises:
         SQLAlchemyError: Re-raises any database errors encountered during the session.
     """
 
-    async with AsyncSession() as session:
+    async with AsyncSessionLocal() as session:
         try:
             yield session
         except SQLAlchemyError:

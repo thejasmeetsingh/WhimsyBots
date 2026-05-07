@@ -369,7 +369,7 @@ async def delete_cron_job(id: str, bot_id: str) -> str:
 
     logger.info(
         {
-            "tool": "update_cron_job",
+            "tool": "delete_cron_job",
             "params": {
                 "id": id,
                 "bot_id": bot_id,
