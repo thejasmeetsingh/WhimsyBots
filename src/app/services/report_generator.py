@@ -12,7 +12,7 @@ from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
-from app.utils import convert_messages_to_ollama_format, extract_html, generate_pdf
+from app.utils import extract_html, generate_pdf
 
 
 logger = logging.getLogger(__name__)
@@ -37,9 +37,12 @@ class ReportGeneratorService:
         self.model = OllamaConfigManager.get_model(bot, ollama)
         self.telegram_client = TelegramClientManager.create_client(bot)
 
-    def generate_and_send(self) -> str:
+    def generate_and_send(self, message: str) -> str:
         """
         Generate a report from bot conversation history and send to user.
+
+        Args:
+            message (str): User's message for report generation.
 
         Returns:
             Status message
@@ -57,18 +60,18 @@ class ReportGeneratorService:
                 MCPToolsBuilder.build_tools_from_servers(list(mcp_servers))
             )
 
-            # Get conversation history
-            messages = Message.objects.filter(bot_id=self.bot.id).order_by("created_at")
-            history = convert_messages_to_ollama_format(
-                messages,
-                system_prompt=CeleryConfig.REPORT_GENERATION_PROMPT,
-            )
-
             # Run tool calling loop to generate report
             report_response = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.model,
-                history=history,
+                history=[
+                    {
+                        "role": "user",
+                        "content": CeleryConfig.REPORT_GENERATION_PROMPT.format(
+                            user_request=message
+                        ),
+                    }
+                ],
                 tools_config=tools_config,
                 ollama=self.ollama,
             )
