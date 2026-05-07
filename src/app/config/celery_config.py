@@ -8,6 +8,7 @@ class CeleryConfig:
     ERROR_MESSAGES = {
         "NO_OLLAMA": "No Ollama configuration found",
         "BOT_NOT_FOUND": "Bot not found with id: {bot_id}",
+        "CRON_JOB_NOT_FOUND": "Cron job not found with id: {job_id}",
         "MESSAGE_NOT_FOUND": "Message not found with id: {msg_id}",
         "TOOL_EXECUTION_FAILED": "Tool execution failed",
         "INTENT_CLASSIFICATION_FAILED": "Failed to classify message intent",
@@ -75,9 +76,20 @@ Reply with ONLY JSON string, nothing else.
     REPORT_GENERATION_PROMPT = """
 You are a professional report generator that produces HTML documents optimized for PDF rendering via WeasyPrint.
 
+## Your Task
+The user has made the following report request:
+
+\"\"\"
+{user_request}
+\"\"\"
+
+Focus entirely on fulfilling this request — tailor the report's title, sections, and content around what the user asked for.
+Use the conversation history provided for any additional context, data, or details needed to complete the report.
+Omit any section that has no relevant data for this particular report.
+
 ## Output Requirements
 - Return ONLY valid HTML — no markdown, no code fences, no explanation outside the HTML.
-- All CSS must be inline or within a single <style> block inside <head>. No external stylesheets or CDN links.
+- All CSS must be inline or within a single `<style>` block inside `<head>`. No external stylesheets or CDN links.
 - Do NOT use JavaScript — WeasyPrint does not execute scripts.
 - Do NOT use flexbox or CSS Grid — WeasyPrint has limited support for these. Use block elements and tables for layout instead.
 
@@ -96,18 +108,28 @@ You are a professional report generator that produces HTML documents optimized f
 - SVG is fully supported by WeasyPrint — prefer inline SVG for any visual data representations.
 
 ## Report Structure
-Generate the report with the following sections (omit a section only if there is genuinely no relevant data):
+Use the user's request as the primary guide for structure. As a baseline, include these sections where relevant:
 
-1. **Header** — Report title, generation date/time, and a brief one-line description.
-2. **Executive Summary** — A concise paragraph summarizing the overall findings.
-3. **Key Insights** — A structured list or table of the most important takeaways.
-4. **Data Breakdown** — Detailed section(s) with tables or visual representations (SVG/HTML-based charts).
-5. **Patterns & Observations** — Narrative analysis of trends or anomalies found in the data.
+1. **Header** — Report title (reflecting the user's request), generation date/time, and a brief one-line description.
+2. **Executive Summary** — A concise paragraph summarizing the findings relative to what was asked.
+3. **Key Insights** — The most important takeaways directly relevant to the user's request.
+4. **Data Breakdown** — Detailed section(s) with tables or SVG/HTML-based visual representations.
+5. **Patterns & Observations** — Trends or anomalies relevant to the user's request.
 6. **Appendix / Raw Data** (if applicable) — Supporting data tables for reference.
 
 ## Styling Aesthetic
 - Use a clean, professional look: white background, dark text (#1a1a1a), with a primary accent color of #2563eb (blue).
 - Section headings should have a left border accent: `border-left: 4px solid #2563eb; padding-left: 10px`.
 - Tables should have alternating row colors (#f9fafb / #ffffff) and a header row with background #2563eb and white text.
-- Add a subtle page footer with the page number using WeasyPrint's `@page` and `@bottom-center` CSS at-rules.
+- Add a subtle page footer with the page number using WeasyPrint's @page and @bottom-center CSS at-rules.
+"""
+
+    CRON_JOB_PROMPT = """
+You are executing a scheduled task. Your only job is to fulfill the purpose of this cron job:
+
+- Task Name: {name}
+- Task Description: {description}
+
+If tools are available, use them only if they help you fulfill this specific task better.
+Deliver your response directly and confidently — do not ask clarifying questions, do not explain what you're doing, and do not mention that this is a scheduled task. Just execute.
 """

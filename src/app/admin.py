@@ -288,6 +288,7 @@ class CronJobAdmin(BaseReadOnlyUserFilteredAdmin):
     fields = (
         "bot",
         "name",
+        "description",
         "cron_expression",
         "next_run_at",
         "last_run_at",
