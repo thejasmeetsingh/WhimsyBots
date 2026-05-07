@@ -123,7 +123,9 @@ def setup_bot_webhook(self, bot_id: str):
             return "Bot is inactive, webhook setup skipped"
 
         # Construct webhook URL
-        webhook_url = f"{settings.WEBHOOK_BASE_URL}/webhook/{bot.telegram_bot_token}/"
+        webhook_url = (
+            f"{settings.WEBHOOK_BASE_URL.strip('/')}/webhook/{bot.telegram_bot_token}/"
+        )
 
         logger.info(f"Setting up webhook for bot '{bot.name}' at: {webhook_url}")
 

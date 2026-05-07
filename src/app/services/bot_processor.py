@@ -107,12 +107,12 @@ class BotMessageProcessor:
         result = StructuredOutput(intent="O", response=raw.strip())
         return result
 
-    def get_cron_job_obj(self) -> MCPServer:
+    def get_default_mcp_servers(self) -> MCPServer:
         """
-        Create a MCPserver (temp) object for cron job
+        Create MCPServer (temp) objects for default MCP servers
 
         Returns:
-            MCPServer object
+            list[MCPServer]: MCPServer objects
         """
 
         cron_job_mcp = MCPServer(
@@ -128,7 +128,14 @@ class BotMessageProcessor:
             },
         )
 
-        return cron_job_mcp
+        time_mcp = MCPServer(
+            name="time",
+            transport=MCPTransportType.LOCAL.value[0],
+            command="python",
+            args=["-m", "mcp_server_time"],
+        )
+
+        return [cron_job_mcp, time_mcp]
 
     def process_message(self) -> StructuredOutput:
         """
@@ -144,9 +151,9 @@ class BotMessageProcessor:
                 MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
             )
 
-            # Add 'cron_job' as a default mcp server to the 'mcp_servers' list
-            cron_job_mcp = self.get_cron_job_obj()
-            mcp_servers.append(cron_job_mcp)
+            # Add default mcp server's to the 'mcp_servers' list
+            default_servers = self.get_default_mcp_servers()
+            mcp_servers.extend(default_servers)
 
             tools_config = asyncio.run(
                 MCPToolsBuilder.build_tools_from_servers(mcp_servers)
@@ -155,6 +162,7 @@ class BotMessageProcessor:
             system_prompt = CeleryConfig.DEFAULT_SYSTEM_PROMPT.format(
                 system_prompt=self.bot.system_prompt or "You are a helpful assistant",
                 bot_id=str(self.bot.id),
+                timezone=settings.TIME_ZONE,
             )
 
             # Fetch messages
