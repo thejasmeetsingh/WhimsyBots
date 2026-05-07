@@ -225,6 +225,7 @@ class CronJob(BaseModel):
 
     bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="bot_cron_jobs")
     name = models.CharField(max_length=100)
+    description = models.TextField()
     cron_expression = models.CharField(
         max_length=100,
         help_text="Scheduling in standard cron format",
