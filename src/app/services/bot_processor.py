@@ -12,11 +12,11 @@ from pydantic import BaseModel, ValidationError
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.choices import MCPTransportType, MessageRole
-from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
 from app.services.tool_executor import MCPToolsBuilder
 from app.services.tool_calling_coordinator import run_tool_calling_loop
 from app.utils import convert_messages_to_ollama_format
+from prompts import CRON_JOB_PROMPT, DEFAULT_SYSTEM_PROMPT
 
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ class BotMessageProcessor:
                 MCPToolsBuilder.build_tools_from_servers(mcp_servers)
             )
 
-            system_prompt = CeleryConfig.DEFAULT_SYSTEM_PROMPT.format(
+            system_prompt = DEFAULT_SYSTEM_PROMPT.format(
                 system_prompt=self.bot.system_prompt or "You are a helpful assistant",
                 bot_id=str(self.bot.id),
                 timezone=settings.TIME_ZONE,
@@ -228,7 +228,7 @@ class BotMessageProcessor:
                 history=[
                     {
                         "role": "user",
-                        "content": CeleryConfig.CRON_JOB_PROMPT.format(
+                        "content": CRON_JOB_PROMPT.format(
                             name=name, description=description
                         ),
                     }

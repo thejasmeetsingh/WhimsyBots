@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from clients import mcp_client
 from app.choices import MCPTransportType
-from app.config import CeleryConfig
+from strings import TOOL_EXECUTION_FAILED
 
 
 logger = logging.getLogger(__name__)
@@ -145,7 +145,7 @@ class ToolExecutor:
 
             if response.get("isError"):
                 logger.warning("Tool execution returned error: %s", response)
-                return CeleryConfig.ERROR_MESSAGES["TOOL_EXECUTION_FAILED"]
+                return TOOL_EXECUTION_FAILED
 
             # Aggregate content from response
             result_parts = []
@@ -180,4 +180,4 @@ class ToolExecutor:
             return result
         except Exception as _:
             logger.error("Failed to execute tool call", exc_info=True)
-            return CeleryConfig.ERROR_MESSAGES["TOOL_EXECUTION_FAILED"]
+            return TOOL_EXECUTION_FAILED

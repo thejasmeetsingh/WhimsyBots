@@ -10,9 +10,10 @@ from app.services.tool_executor import MCPToolsBuilder
 from app.services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
-from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
-from app.utils import extract_html, generate_pdf
+from app.utils import convert_messages_to_ollama_format, extract_html, generate_pdf
+from prompts import REPORT_GENERATION_PROMPT
+from strings import REPORT_READY
 
 
 logger = logging.getLogger(__name__)
@@ -60,18 +61,20 @@ class ReportGeneratorService:
                 MCPToolsBuilder.build_tools_from_servers(list(mcp_servers))
             )
 
+            # Fetch messages
+            messages = Message.objects.filter(bot_id=self.bot.id).order_by("created_at")
+
+            # Prepare message history
+            history = convert_messages_to_ollama_format(
+                messages,
+                system_prompt=REPORT_GENERATION_PROMPT.format(user_request=message),
+            )
+
             # Run tool calling loop to generate report
             report_response = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.model,
-                history=[
-                    {
-                        "role": "user",
-                        "content": CeleryConfig.REPORT_GENERATION_PROMPT.format(
-                            user_request=message
-                        ),
-                    }
-                ],
+                history=history,
                 tools_config=tools_config,
                 ollama=self.ollama,
             )
@@ -90,9 +93,7 @@ class ReportGeneratorService:
             self.telegram_client.send_document(
                 file_bytes=pdf_bytes,
                 filename=filename,
-                caption=CeleryConfig.TELEGRAM_MESSAGES["REPORT_READY"].format(
-                    bot_name=self.bot.name
-                ),
+                caption=REPORT_READY.format(bot_name=self.bot.name),
             )
 
             logger.info(f"Report generated and sent for bot: {self.bot.name}")
