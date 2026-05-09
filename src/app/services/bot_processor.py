@@ -167,11 +167,14 @@ class BotMessageProcessor:
 
             # Fetch messages
             messages = Message.objects.filter(bot_id=self.bot.id).order_by("created_at")
+            conversations = messages.filter(
+                role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
+            )
+            summary_msg = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
 
             # Prepare message history
             history = convert_messages_to_ollama_format(
-                messages,
-                system_prompt=system_prompt,
+                messages=conversations, system_prompt=system_prompt, summary=summary_msg
             )
 
             # Run tool calling loop
