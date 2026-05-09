@@ -6,10 +6,14 @@ Handles message sending, file uploads, user actions, and webhook updates.
 """
 
 import logging
+import time
 from typing import Dict, List, Optional
 
+import redis
 import requests
+from django.conf import settings
 
+from app.rate_limiter import RateLimiter
 from app.utils import split_message
 
 
@@ -27,6 +31,20 @@ class TelegramError(Exception):
     """
 
     pass
+
+
+class TelegramRateLimitError(TelegramError):
+    """
+    Raised when Telegram returns a 429 Too Many Requests response.
+
+    Attributes:
+        retry_after (int): Seconds to wait before retrying, as specified
+                           by Telegram in the response body.
+    """
+
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        super().__init__(f"Telegram rate limit hit. Retry after {retry_after}s")
 
 
 class TelegramClient:
@@ -50,6 +68,10 @@ class TelegramClient:
     base_url: str = None
     chat_id: str = None
 
+    # Max attempts for the inline rate limit retry loop in send_message/send_document.
+    _RATE_LIMIT_RETRIES = 3
+    _RATE_LIMIT_WAIT = 1  # seconds to wait between retries when throttled locally
+
     def __init__(self, token: str, chat_id: str = None):
         """
         Initialize Telegram client.
@@ -70,6 +92,12 @@ class TelegramClient:
         self.chat_id = chat_id
         self.base_url = f"https://api.telegram.org/bot{token}"
 
+        self._token = token
+
+        # Instantiate Redis client from broker URL (redis package already present via Celery)
+        self._redis = redis.from_url(settings.CELERY_BROKER_URL)
+        self._rate_limiter = RateLimiter(self._redis, token)
+
     def _post(self, endpoint: str, payload: Dict) -> Dict:
         """
         Make authenticated POST request to Telegram API.
@@ -85,13 +113,20 @@ class TelegramClient:
 
         Raises:
             TelegramError: If HTTP status != 200 or ok != true
+            TelegramRateLimitError: with retry_after on 429.
 
         Internal method - not meant to be called directly.
         """
 
         url = f"{self.base_url}/{endpoint}"
-
         response = requests.post(url=url, json=payload)
+
+        # Rate Limit Handling
+        if response.status_code == 429:
+            data = response.json()
+            retry_after = data.get("parameters", {}).get("retry_after", 1)
+            raise TelegramRateLimitError(retry_after=retry_after)
+
         if response.status_code != 200:
             raise TelegramError(
                 f"Telegram API error: Status code - {response.status_code}"
@@ -102,6 +137,27 @@ class TelegramClient:
             raise TelegramError(f"Telegram API error on {endpoint}: {data}")
 
         return data["result"]
+
+    def _acquire_rate_limit(self):
+        """
+        Block until a send slot is available within the local rate limiter.
+
+        Retries up to _RATE_LIMIT_RETRIES times, sleeping _RATE_LIMIT_WAIT
+        seconds between attempts. Logs a warning if throttled.
+        """
+
+        for attempt in range(self._RATE_LIMIT_RETRIES):
+            if self._rate_limiter.acquire():
+                return
+            logger.warning(
+                f"Rate limiter throttled send attempt {attempt + 1}/"
+                f"{self._RATE_LIMIT_RETRIES} for bot token ...{self._token[-6:]}"
+            )
+            time.sleep(self._RATE_LIMIT_WAIT)
+
+        # Final attempt — if still throttled let it through and rely
+        # on Telegram's 429 + task retry as the hard backstop.
+        logger.warning("Rate limiter exhausted retries — proceeding anyway")
 
     def send_message(self, text: str, parse_mode: str = "Markdown") -> Dict:
         """
@@ -147,6 +203,8 @@ class TelegramClient:
         chunks = split_message(text)
 
         for chunk in chunks:
+            self._acquire_rate_limit()  # proactive check before each chunk
+
             result = self._post(
                 "sendMessage",
                 {
@@ -190,13 +248,20 @@ class TelegramClient:
             ... )
         """
 
-        url = f"{self.base_url}/sendDocument"
+        self._acquire_rate_limit()  # proactive check before upload
 
+        url = f"{self.base_url}/sendDocument"
         response = requests.post(
             url,
             data={"chat_id": self.chat_id, "caption": caption},
             files={"document": (filename, file_bytes, "application/octet-stream")},
         )
+
+        # Rate Limit Handling
+        if response.status_code == 429:
+            data = response.json()
+            retry_after = data.get("parameters", {}).get("retry_after", 1)
+            raise TelegramRateLimitError(retry_after=retry_after)
 
         if response.status_code != 200:
             raise TelegramError(
