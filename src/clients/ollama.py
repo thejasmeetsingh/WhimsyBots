@@ -189,6 +189,6 @@ class OllamaClient:
         if message.tool_calls:
             tools = list(map(lambda x: x["function"], message.tool_calls))
 
-        result = {"message": message.content, "tools": tools}
+        result = {"message": message.content.strip(), "tools": tools}
 
         return result
