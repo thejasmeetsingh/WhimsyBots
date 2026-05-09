@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from app.choices import MessageRole
 from app.models import CronJob, Ollama, Bot, MCPServer, Message, Log
 from app.forms import OllamaForm, BotForm
-from app.tasks import setup_bot_webhook
+from app.tasks import manage_conversation_summary, setup_bot_webhook
 from app.utils import get_admin_link
 
 
@@ -61,6 +61,14 @@ class OllamaAdmin(admin.ModelAdmin):
         """Allow adding only if no Ollama instance exists."""
 
         return Ollama.objects.count() == 0
+
+    def save_model(self, request, obj, form, change):
+        if change and "num_ctx" in form.changed_data:
+            # Trigger summary regeneration for all active bots.
+            # No bot_id = task fetches all active bots internally.
+            manage_conversation_summary.apply_async(queue="default")
+
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Bot)
