@@ -67,10 +67,19 @@ def get_admin_link(model: str, value: int, obj) -> str:
 
 def split_message(text: str, limit: int = 4096) -> List[str]:
     """
-    Split a long message into chunks respecting a size limit.
+    Split a long message into chunks respecting Telegram's character limit.
 
-    Useful for Telegram API which has a message length limit (default 4096 chars).
-    Splits at the boundary without breaking mid-character.
+    Attempts to split at the most natural boundary available, in this priority:
+        1. End of a closing code fence (```) — never break inside a code block
+        2. Paragraph boundary (double newline)
+        3. Line boundary (single newline)
+        4. Sentence boundary ('. ', '! ', '? ')
+        5. Word boundary (space)
+        6. Hard cut (fallback — should rarely happen)
+
+    If a split occurs mid-code-block, the next chunk is automatically prefixed
+    with a re-opened code fence (preserving the language tag if present) so
+    Telegram renders it correctly.
 
     Args:
         text (str): Text to split
@@ -78,25 +87,147 @@ def split_message(text: str, limit: int = 4096) -> List[str]:
 
     Returns:
         list[str]: List of text chunks, each <= limit characters
-
-    Example:
-        >>> very_long_text = "x" * 10000
-        >>> chunks = split_message(very_long_text)
-        >>> len(chunks)
-        3
-        >>> all(len(chunk) <= 4096 for chunk in chunks)
-        True
     """
 
     if len(text) <= limit:
         return [text]
 
     chunks = []
+    # Tracks the opening line of an unclosed code fence e.g. "```python"
+    # so we can re-open it at the start of the next chunk if needed.
+    open_fence: str | None = None
+
     while text:
-        chunks.append(text[:limit])
-        text = text[limit:]
+        # If we're inside a code block, reserve space for the re-opening fence
+        # line and a closing fence at the end of this chunk.
+        if open_fence:
+            # "```python\n" + chunk content + "\n```"
+            reserved = len(open_fence) + 1 + 4  # +1 for \n after tag, +4 for \n```
+            effective_limit = limit - reserved
+        else:
+            effective_limit = limit
+
+        if len(text) <= effective_limit:
+            # Remaining text fits — close any open fence and we're done.
+            chunk = f"{open_fence}\n{text}\n```" if open_fence else text
+            chunks.append(chunk)
+            break
+
+        # --- Find the best split point within effective_limit ---
+        window = text[:effective_limit]
+        split_at = _find_split_point(window)
+
+        chunk_text = text[:split_at].rstrip()
+        text = text[split_at:].lstrip()
+
+        # --- Code fence tracking ---
+        # Check if this chunk contains an unclosed code fence.
+        open_fence = _get_unclosed_fence(chunk_text, open_fence)
+
+        # Wrap chunk with fence markers if we were inside a code block.
+        if open_fence:
+            # Close the fence at the end of this chunk so it renders properly,
+            # then re-open it at the start of the next iteration.
+            chunk = (
+                f"{open_fence}\n{chunk_text}\n```"
+                if _needs_fence_prefix(chunk_text, open_fence)
+                else f"{chunk_text}\n```"
+            )
+        else:
+            chunk = chunk_text
+
+        chunks.append(chunk)
 
     return chunks
+
+
+def _find_split_point(window: str) -> int:
+    """
+    Find the best character index to split at within the given window.
+
+    Scans backwards from the end of the window to find the highest-priority
+    natural boundary. Falls back to a hard cut at len(window) if none found.
+
+    Args:
+        window (str): The text slice we are allowed to consume (len <= limit)
+
+    Returns:
+        int: Index at which to split (exclusive — text[:split_at] is the chunk)
+    """
+
+    # Priority 1: closing code fence on its own line
+    idx = window.rfind("\n```")
+    if idx != -1:
+        return idx + 4  # include the closing ```
+
+    # Priority 2: paragraph boundary
+    idx = window.rfind("\n\n")
+    if idx != -1:
+        return idx + 2
+
+    # Priority 3: line boundary
+    idx = window.rfind("\n")
+    if idx != -1:
+        return idx + 1
+
+    # Priority 4: sentence boundary
+    for terminator in (". ", "! ", "? "):
+        idx = window.rfind(terminator)
+        if idx != -1:
+            return idx + len(terminator)
+
+    # Priority 5: word boundary
+    idx = window.rfind(" ")
+    if idx != -1:
+        return idx + 1
+
+    # Priority 6: hard cut (no natural boundary found)
+    return len(window)
+
+
+def _get_unclosed_fence(chunk: str, currently_open: str | None) -> str | None:
+    """
+    Scan a chunk line-by-line to determine whether we end inside a code block.
+
+    Args:
+        chunk (str): The chunk text to scan
+        currently_open (str | None): Any fence that was already open before this chunk
+
+    Returns:
+        str | None: The opening fence line (e.g. "```python") if a block is
+                    still open at the end of the chunk, otherwise None.
+    """
+
+    open_fence = currently_open
+
+    for line in chunk.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            if open_fence is None:
+                # Opening a new fence — capture the whole line (may have a lang tag)
+                open_fence = stripped
+            else:
+                # Closing the open fence
+                open_fence = None
+
+    return open_fence
+
+
+def _needs_fence_prefix(chunk_text: str, open_fence: str) -> bool:
+    """
+    Check whether the chunk text already starts with the fence opener.
+
+    Avoids double-prefixing when the split happened exactly at a fence boundary.
+
+    Args:
+        chunk_text (str): The chunk content
+        open_fence (str): The fence opening line (e.g. "```python")
+
+    Returns:
+        bool: True if the prefix should be added
+    """
+
+    return not chunk_text.lstrip().startswith(open_fence)
 
 
 def parse_telegram_update(update: Dict) -> Optional[Dict[str, str]]:
@@ -176,44 +307,30 @@ def generate_pdf(html_content: str) -> bytes:
 
 
 def convert_messages_to_ollama_format(
-    messages, system_prompt: Optional[str] = None
+    messages, system_prompt: Optional[str] = None, summary: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """
     Convert Message model instances to Ollama API message format.
 
-    Transforms the internal message representation to the format expected
-    by the Ollama chat API, including optional system prompt.
-
     Args:
-        messages: Queryset or list of Message model instances
-        system_prompt (str | None): Optional system prompt prepended to messages
+        messages: Queryset or list of Message instances (role U/A only)
+        system_prompt (str | None): Runtime system prompt — always first
+        summary (str | None): Persisted conversation summary — slots in
+            immediately after system_prompt if provided
 
     Returns:
-        list[dict]: List of message dicts with 'role' and 'content' keys
+        list[dict]: Ollama-formatted message list
 
-    Message format:
-        {
-            "role": "system" | "user" | "assistant",
-            "content": "message text"
-        }
-
-    Example:
-        >>> from app.models import Message, Bot
-        >>> bot = Bot.objects.first()
-        >>> messages = bot.messages.all()
-        >>> ollama_format = convert_messages_to_ollama_format(
-        ...     messages,
-        ...     system_prompt="You are a helpful assistant."
-        ... )
-        >>> # Now can be passed to OllamaClient.chat(messages=ollama_format)
-
-    Note:
-        - "U" role becomes "user"
-        - "A" role becomes "assistant"
-        - System prompt is always first (if provided)
+    History structure:
+        [
+            {"role": "system", "content": system_prompt},   # if provided
+            {"role": "system", "content": "Summary: ..."},  # if summary provided
+            {"role": "user",      "content": "..."},         # recent messages
+            {"role": "assistant", "content": "..."},
+            ...
+        ]
     """
 
-    # Mapping from Message model role codes to Ollama role names
     role_mapping = {
         "U": "user",
         "A": "assistant",
@@ -221,13 +338,22 @@ def convert_messages_to_ollama_format(
 
     ollama_messages = []
 
-    # Add system prompt first if provided
     if system_prompt:
         ollama_messages.append({"role": "system", "content": system_prompt})
 
-    # Add all messages in conversation order
+    if summary:
+        ollama_messages.append(
+            {
+                "role": "system",
+                "content": f"Summary of earlier conversation:\n{summary}",
+            }
+        )
+
     for message in messages:
-        ollama_role = role_mapping.get(message.role, message.role.lower())
+        # Skip system messages — summary is handled above explicitly
+        if message.role not in role_mapping:
+            continue
+        ollama_role = role_mapping[message.role]
         ollama_messages.append({"role": ollama_role, "content": message.content})
 
     return ollama_messages
