@@ -1,16 +1,18 @@
 """Celery task definitions for async job processing"""
 
 import logging
+from typing import Optional
 
 from django.utils import timezone
 from django.conf import settings
 from app.choices import MessageIntentType
+from app.services.conversation_summary import ConversationSummaryService
 from clients import OllamaClient
 
 from app.models import Bot, CronJob, Message
 from app.utils import calculate_next_run_at
+from strings import NO_OLLAMA, OBJ_NOT_FOUND
 from whimsybots.celery import task as celery
-from app.config import CeleryConfig
 from app.managers import OllamaConfigManager, TelegramClientManager
 from app.services import (
     BotMessageProcessor,
@@ -58,8 +60,8 @@ def cron_job_poller(self):
         # Check if Ollama is configured
         ollama = OllamaConfigManager.get_ollama_config()
         if not ollama:
-            logger.warning(CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"])
-            return CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"]
+            logger.warning(NO_OLLAMA)
+            return NO_OLLAMA
 
         # Find cron jobs due for execution
         due_jobs = CronJob.objects.filter(
@@ -156,18 +158,14 @@ def process_cron_job(self, job_id: str):
         # Validate configuration
         ollama = OllamaConfigManager.get_ollama_config()
         if not ollama:
-            logger.error(CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"])
-            return CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"]
+            logger.error(NO_OLLAMA)
+            return NO_OLLAMA
 
         try:
             cron_job = CronJob.objects.get(id=job_id)
         except CronJob.DoesNotExist:
-            logger.error(
-                CeleryConfig.ERROR_MESSAGES["CRON_JOB_NOT_FOUND"].format(job_id=job_id)
-            )
-            return CeleryConfig.ERROR_MESSAGES["CRON_JOB_NOT_FOUND"].format(
-                job_id=job_id
-            )
+            logger.error(OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=job_id))
+            return OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=job_id)
 
         # Initialize clients and processor
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
@@ -180,6 +178,13 @@ def process_cron_job(self, job_id: str):
 
         # Send response
         processor.send_response(result)
+
+        # Trigger summary management after response is sent
+        manage_conversation_summary.apply_async(
+            queue="default",
+            kwargs={"bot_id": str(cron_job.bot_id)},
+        )
+        logger.info("Conversation summary task queued")
 
         # Update cron job metadata
         cron_job.next_run_at = calculate_next_run_at(cron_job.cron_expression)
@@ -215,17 +220,15 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
         # Validate configuration
         ollama = OllamaConfigManager.get_ollama_config()
         if not ollama:
-            logger.error(CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"])
-            return CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"]
+            logger.error(NO_OLLAMA)
+            return NO_OLLAMA
 
         # Get bot
         try:
             bot = Bot.objects.get(id=bot_id)
         except Bot.DoesNotExist:
-            logger.error(
-                CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
-            )
-            return CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
+            logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot))
+            return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot)
 
         # Initialize clients and processor
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
@@ -248,6 +251,13 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
 
             # Send response
             processor.send_response(result.response)
+
+            # Trigger summary management after response is sent
+            manage_conversation_summary.apply_async(
+                queue="default",
+                kwargs={"bot_id": bot_id},
+            )
+            logger.info("Conversation summary task queued")
 
         logger.info(f"Message processing completed for bot: {bot.name}")
         return "Processed inbound message successfully"
@@ -285,12 +295,8 @@ def classify_intent(self, bot_id: str, msg_id: str, intent: str):
             message.save(update_fields=["intent"])
 
         except Message.DoesNotExist:
-            logger.error(
-                CeleryConfig.ERROR_MESSAGES["MESSAGE_NOT_FOUND"].format(msg_id=msg_id)
-            )
-            return CeleryConfig.ERROR_MESSAGES["MESSAGE_NOT_FOUND"].format(
-                msg_id=msg_id
-            )
+            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
+            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
 
         if intent == MessageIntentType.REPORT.value[0]:
             generate_report.apply_async(
@@ -326,28 +332,22 @@ def generate_report(self, bot_id: str, msg_id: str):
         # Validate configuration
         ollama = OllamaConfigManager.get_ollama_config()
         if not ollama:
-            logger.error(CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"])
-            return CeleryConfig.ERROR_MESSAGES["NO_OLLAMA"]
+            logger.error(NO_OLLAMA)
+            return NO_OLLAMA
 
         # Get bot
         try:
             bot = Bot.objects.get(id=bot_id)
         except Bot.DoesNotExist:
-            logger.error(
-                CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
-            )
-            return CeleryConfig.ERROR_MESSAGES["BOT_NOT_FOUND"].format(bot_id=bot_id)
+            logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
+            return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id)
 
         # Get message
         try:
             message = Message.objects.get(id=msg_id)
         except Message.DoesNotExist:
-            logger.error(
-                CeleryConfig.ERROR_MESSAGES["MESSAGE_NOT_FOUND"].format(msg_id=msg_id)
-            )
-            return CeleryConfig.ERROR_MESSAGES["MESSAGE_NOT_FOUND"].format(
-                msg_id=msg_id
-            )
+            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
+            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
 
         # Initialize clients and service
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
@@ -362,4 +362,72 @@ def generate_report(self, bot_id: str, msg_id: str):
     except Exception as e:
         logger.error("Failed to generate report", exc_info=True)
         # Retry with exponential backoff
+        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
+
+
+@celery.task(bind=True, max_retries=3)
+def manage_conversation_summary(self, bot_id: Optional[str] = None):
+    """
+    Manage context window optimization for one or all active bots.
+
+    Called after a message is sent to the user (process_inbound_message,
+    process_cron_job) with a bot_id to process a single bot.
+
+    Called without bot_id when triggered from the Ollama admin save_model
+    override — in that case all active bots are processed.
+
+    Args:
+        bot_id: ID of the bot to process. If None, processes all active bots.
+
+    Returns:
+        Status message
+
+    Raises:
+        Retries on failure with exponential backoff
+    """
+
+    try:
+        ollama = OllamaConfigManager.get_ollama_config()
+        if not ollama:
+            logger.error(NO_OLLAMA)
+            return NO_OLLAMA
+
+        ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
+
+        if bot_id:
+            try:
+                bots = [Bot.objects.get(id=bot_id)]
+            except Bot.DoesNotExist:
+                logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
+                return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id)
+        else:
+            bots = list(Bot.objects.filter(is_active=True))
+
+        summaries_to_update = []
+        summaries_to_create = []
+
+        for bot in bots:
+            service = ConversationSummaryService(bot, ollama, ollama_client)
+            result = service.process()
+
+            if result:
+                summary_msg, created = result
+                if created:
+                    summaries_to_create.append(summary_msg)
+                else:
+                    summaries_to_update.append(summary_msg)
+
+        # Batch DB writes to minimize query count
+        if summaries_to_create:
+            Message.objects.bulk_create(summaries_to_create)
+            logger.info(f"Bulk created {len(summaries_to_create)} summaries")
+
+        if summaries_to_update:
+            Message.objects.bulk_update(summaries_to_update, ["content"])
+            logger.info(f"Bulk updated {len(summaries_to_update)} summaries")
+
+        return f"Summary management completed for {len(bots)} bot(s)"
+
+    except Exception as e:
+        logger.error("Failed to manage conversation summaries", exc_info=True)
         raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
