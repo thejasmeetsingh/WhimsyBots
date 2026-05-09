@@ -53,8 +53,6 @@ class ReportGeneratorService:
         """
 
         try:
-            self.telegram_client.send_typing_action()
-
             # Build tools from servers
             mcp_servers = MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
             tools_config = asyncio.run(
@@ -74,6 +72,9 @@ class ReportGeneratorService:
                 system_prompt=REPORT_GENERATION_PROMPT.format(user_request=message),
                 summary=summary_msg,
             )
+
+            # Send typing indicator (responsive UX)
+            self.telegram_client.send_typing_action()
 
             # Run tool calling loop to generate report
             report_response = run_tool_calling_loop(

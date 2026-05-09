@@ -177,6 +177,9 @@ class BotMessageProcessor:
                 messages=conversations, system_prompt=system_prompt, summary=summary_msg
             )
 
+            # Send typing indicator (responsive UX)
+            self.telegram_client.send_typing_action()
+
             # Run tool calling loop
             response = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
@@ -223,6 +226,9 @@ class BotMessageProcessor:
             tools_config = asyncio.run(
                 MCPToolsBuilder.build_tools_from_servers(mcp_servers)
             )
+
+            # Send typing indicator (responsive UX)
+            self.telegram_client.send_typing_action()
 
             # Run tool calling loop
             response = run_tool_calling_loop(
