@@ -1,27 +1,4 @@
-"""Celery configuration and constants"""
-
-
-class CeleryConfig:
-    """Configuration and constants for Celery tasks"""
-
-    # Error messages
-    ERROR_MESSAGES = {
-        "NO_OLLAMA": "No Ollama configuration found",
-        "BOT_NOT_FOUND": "Bot not found with id: {bot_id}",
-        "CRON_JOB_NOT_FOUND": "Cron job not found with id: {job_id}",
-        "MESSAGE_NOT_FOUND": "Message not found with id: {msg_id}",
-        "TOOL_EXECUTION_FAILED": "Tool execution failed",
-        "INTENT_CLASSIFICATION_FAILED": "Failed to classify message intent",
-    }
-
-    # Telegram messages
-    TELEGRAM_MESSAGES = {
-        "REPORT_GENERATING": "📊 Generating your report, one moment...",
-        "REPORT_READY": "📄 Your {bot_name} report is ready!",
-    }
-
-    # Prompts
-    DEFAULT_SYSTEM_PROMPT = """
+DEFAULT_SYSTEM_PROMPT = """
 {system_prompt}
 
 - `bot_id` for cron job management: {bot_id}
@@ -73,7 +50,7 @@ R        - Briefly acknowledge their request and let them know
 Reply with ONLY JSON string, nothing else.
 """
 
-    REPORT_GENERATION_PROMPT = """
+REPORT_GENERATION_PROMPT = """
 You are a professional report generator that produces HTML documents optimized for PDF rendering via WeasyPrint.
 
 ## Your Task
@@ -124,7 +101,7 @@ Use the user's request as the primary guide for structure. As a baseline, includ
 - Add a subtle page footer with the page number using WeasyPrint's @page and @bottom-center CSS at-rules.
 """
 
-    CRON_JOB_PROMPT = """
+CRON_JOB_PROMPT = """
 You are executing a scheduled task. Your only job is to fulfill the purpose of this cron job:
 
 - Task Name: {name}
@@ -132,4 +109,16 @@ You are executing a scheduled task. Your only job is to fulfill the purpose of t
 
 If tools are available, use them only if they help you fulfill this specific task better.
 Deliver your response directly and confidently — do not ask clarifying questions, do not explain what you're doing, and do not mention that this is a scheduled task. Just execute.
+"""
+
+SUMMARY_PROMPT = """
+You are a conversation summarizer. Below is a previous summary of an ongoing conversation, followed by newer messages.
+Produce a single updated summary that incorporates both, preserving all important context, decisions, facts, and user preferences.
+Write the summary in third person as background context. Output only the summary text with no preamble or explanation.
+
+## Previous summary
+{previous_summary}
+
+## New Messages
+{messages}
 """
