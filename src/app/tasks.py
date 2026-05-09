@@ -11,6 +11,7 @@ from clients import OllamaClient
 
 from app.models import Bot, CronJob, Message
 from app.utils import calculate_next_run_at
+from clients.telegram import TelegramRateLimitError
 from strings import NO_OLLAMA, OBJ_NOT_FOUND
 from whimsybots.celery import task as celery
 from app.managers import OllamaConfigManager, TelegramClientManager
@@ -152,6 +153,7 @@ def process_cron_job(self, job_id: str):
         Status message
 
     Raises:
+        TelegramRateLimitError: If telegram sends a 429 error
         Retries on failure with exponential backoff
     """
     try:
@@ -194,6 +196,12 @@ def process_cron_job(self, job_id: str):
         logger.info(f"Cron job processing completed for bot: {cron_job.bot.name}")
         return "Processed cron job successfully"
 
+    except TelegramRateLimitError as e:
+        logger.warning(
+            f"Telegram rate limit hit in process_cron_job, retrying in {e.retry_after}s"
+        )
+        raise self.retry(exc=e, countdown=e.retry_after)
+
     except Exception as e:
         logger.error("Failed to process cron job", exc_info=True)
         # Retry with exponential backoff: 60s, 300s, 900s
@@ -213,6 +221,7 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
         Status message
 
     Raises:
+        TelegramRateLimitError: If telegram sends a 429 error
         Retries on failure with exponential backoff
     """
 
@@ -261,6 +270,13 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
 
         logger.info(f"Message processing completed for bot: {bot.name}")
         return "Processed inbound message successfully"
+
+    except TelegramRateLimitError as e:
+        logger.warning(
+            f"Telegram rate limit hit in process_inbound_message, "
+            f"retrying in {e.retry_after}s"
+        )
+        raise self.retry(exc=e, countdown=e.retry_after)
 
     except Exception as e:
         logger.error("Failed to process inbound message", exc_info=True)
@@ -325,6 +341,7 @@ def generate_report(self, bot_id: str, msg_id: str):
         Status message
 
     Raises:
+        TelegramRateLimitError: If telegram sends a 429 error
         Retries on failure with exponential backoff
     """
 
@@ -358,6 +375,12 @@ def generate_report(self, bot_id: str, msg_id: str):
 
         logger.info(f"Report generated for bot: {bot.name}")
         return result
+
+    except TelegramRateLimitError as e:
+        logger.warning(
+            f"Telegram rate limit hit in generate_report, retrying in {e.retry_after}s"
+        )
+        raise self.retry(exc=e, countdown=e.retry_after)
 
     except Exception as e:
         logger.error("Failed to generate report", exc_info=True)
