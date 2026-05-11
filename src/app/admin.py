@@ -139,9 +139,18 @@ class BotAdmin(admin.ModelAdmin):
         if not obj:
             return "-"
 
+        # Messages
         msgs_count = obj.messages.count()
-        active = obj.mcp_servers.filter(is_active=True).count()
-        inactive = obj.mcp_servers.filter(is_active=False).count()
+
+        # MCP Servers
+        mcps_active = obj.mcp_servers.filter(is_active=True).count()
+        mcps_inactive = obj.mcp_servers.filter(is_active=False).count()
+
+        # Cron Jobs
+        active_crons = obj.bot_cron_jobs.filter(is_active=True).count()
+        inactive_crons = obj.bot_cron_jobs.filter(is_active=False).count()
+
+        # Logs
         successes = obj.bot_logs.filter(is_success=True).count()
         errors = obj.bot_logs.filter(is_success=False).count()
 
@@ -150,11 +159,14 @@ class BotAdmin(admin.ModelAdmin):
                 <thead>
                     <tr>
                         <th>Messages</th>
+                        <th colspan="2">Cron Jobs</th>
                         <th colspan="2">MCP Servers</th>
                         <th colspan="2">Logs</th>
                     </tr>
                     <tr>
                         <th></th>
+                        <th>Active</th>
+                        <th>Inactive</th>
                         <th>Active</th>
                         <th>Inactive</th>
                         <th>Successes</th>
@@ -164,8 +176,10 @@ class BotAdmin(admin.ModelAdmin):
                 <tbody>
                     <tr>
                         <td>{get_admin_link("message", msgs_count, obj)}</td>
-                        <td>{get_admin_link("mcpserver", active, obj)}</td>
-                        <td>{get_admin_link("mcpserver", inactive, obj)}</td>
+                        <td>{get_admin_link("cronjob", active_crons, obj)}</td>
+                        <td>{get_admin_link("cronjob", inactive_crons, obj)}</td>
+                        <td>{get_admin_link("mcpserver", mcps_active, obj)}</td>
+                        <td>{get_admin_link("mcpserver", mcps_inactive, obj)}</td>
                         <td>{get_admin_link("log", successes, obj)}</td>
                         <td>{get_admin_link("log", errors, obj)}</td>
                     </tr>
