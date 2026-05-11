@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Literal
+from typing import Literal, Optional
 
 from django.conf import settings
 from pydantic import BaseModel, ValidationError
@@ -137,12 +137,13 @@ class BotMessageProcessor:
 
         return {"cron_job": cron_job_mcp, "time": time_mcp}
 
-    def process_message(self) -> StructuredOutput:
+    def process_message(self) -> tuple[StructuredOutput, Optional[int]]:
         """
         Process message with tool calling loop.
 
         Returns:
             StructuredOutput: Intent and LLM Response
+            ollama_ms: total duration taken by ollama
         """
 
         try:
@@ -181,7 +182,7 @@ class BotMessageProcessor:
             self.telegram_client.send_typing_action()
 
             # Run tool calling loop
-            response = run_tool_calling_loop(
+            response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.model,
                 history=history,
@@ -192,7 +193,7 @@ class BotMessageProcessor:
 
             # Validate the response strucutre
             result = self._parse_llm_response(response)
-            return result
+            return result, ollama_ms
 
         except ValidationError as _:
             logger.error("Invalid response returned from the bot", exc_info=True)
@@ -201,7 +202,9 @@ class BotMessageProcessor:
             logger.error("Failed to process message with tools", exc_info=True)
             raise
 
-    def process_cron_job(self, name: str, description: str) -> str:
+    def process_cron_job(
+        self, name: str, description: str
+    ) -> tuple[str, Optional[int]]:
         """
         Process cron job with tool calling loop.
 
@@ -210,7 +213,7 @@ class BotMessageProcessor:
             description (str): cron job description
 
         Returns:
-            Final response from LLM
+            Final response from LLM and total duration taken by ollama
         """
 
         try:
@@ -231,7 +234,7 @@ class BotMessageProcessor:
             self.telegram_client.send_typing_action()
 
             # Run tool calling loop
-            response = run_tool_calling_loop(
+            response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.model,
                 history=[
@@ -246,7 +249,7 @@ class BotMessageProcessor:
                 ollama=self.ollama,
             )
 
-            return response
+            return response, ollama_ms
 
         except ValidationError as _:
             logger.error("Invalid response returned from the bot", exc_info=True)

@@ -18,7 +18,7 @@ def run_tool_calling_loop(
     tools_config: list,
     ollama: Ollama,
     format: Optional[dict] = None,
-) -> str:
+) -> tuple[str, Optional[int]]:
     """
     Execute the tool calling loop with Ollama and MCP tools.
 
@@ -31,7 +31,7 @@ def run_tool_calling_loop(
         format (Optional): A strucutred format of the response
 
     Returns:
-        Final response message from Ollama
+        Final response message from Ollama and total duration in milliseconds.
 
     Raises:
         Exception: If the tool calling loop fails
@@ -72,7 +72,7 @@ def run_tool_calling_loop(
                         }
                     )
 
-        return response.get("message", "")
+        return response.get("message", ""), response.get("ollama_ms")
     except Exception as _:
         logger.error("Failed to run tool calling loop", exc_info=True)
         raise

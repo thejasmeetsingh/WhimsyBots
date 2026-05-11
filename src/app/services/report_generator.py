@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+from typing import Optional
 
 from django.utils import timezone
 
@@ -38,7 +39,7 @@ class ReportGeneratorService:
         self.model = OllamaConfigManager.get_model(bot, ollama)
         self.telegram_client = TelegramClientManager.create_client(bot)
 
-    def generate_and_send(self, message: str) -> str:
+    def generate_and_send(self, message: str) -> tuple[str, Optional[int]]:
         """
         Generate a report from bot conversation history and send to user.
 
@@ -46,7 +47,7 @@ class ReportGeneratorService:
             message (str): User's message for report generation.
 
         Returns:
-            Status message
+            Status message and total duration taken by ollama
 
         Raises:
             Exception: If report generation or sending fails
@@ -77,7 +78,7 @@ class ReportGeneratorService:
             self.telegram_client.send_typing_action()
 
             # Run tool calling loop to generate report
-            report_response = run_tool_calling_loop(
+            report_response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.model,
                 history=history,
@@ -103,7 +104,7 @@ class ReportGeneratorService:
             )
 
             logger.info(f"Report generated and sent for bot: {self.bot.name}")
-            return f"Report generated successfully for bot: {self.bot.name}"
+            return f"Report generated successfully for bot: {self.bot.name}", ollama_ms
 
         except Exception as _:
             logger.error("Failed to generate report", exc_info=True)
