@@ -6,6 +6,13 @@ class BaseChoices(Enum):
     def get_values(cls):
         return tuple(x.value for x in cls)
 
+    @classmethod
+    def get_readable(cls, code: str) -> str:
+        for member in cls:
+            if member.value[0] == code:
+                return member.value[1]
+        raise ValueError(f"Code '{code}' not found in {cls.__name__}")
+
 
 class MCPTransportType(BaseChoices):
     REMOTE = ("R", "Remote")
