@@ -141,6 +141,7 @@ class OllamaClient:
             dict: Response with keys:
                 - "message" (str): Assistant's text response
                 - "tools" (list[dict] | None): Tool calls made (if any)
+                - "ollama_ms" (int | None): total time taken by ollama service
 
         Raises:
             ollama.ResponseError: If Ollama API call fails
@@ -183,12 +184,19 @@ class OllamaClient:
             model=model, messages=messages, tools=tools, format=format, options=options
         )
         message = response.message
+        total_duration_ns = response.total_duration
+        ollama_ms = round(total_duration_ns / 1_000_000) if total_duration_ns else None
+
         tools = None
 
         # Extract tool calls if any were made
         if message.tool_calls:
             tools = list(map(lambda x: x["function"], message.tool_calls))
 
-        result = {"message": message.content.strip(), "tools": tools}
+        result = {
+            "message": message.content.strip(),
+            "tools": tools,
+            "ollama_ms": ollama_ms,
+        }
 
         return result
