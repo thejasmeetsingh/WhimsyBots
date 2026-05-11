@@ -7,9 +7,10 @@ from django.utils import timezone
 from django.conf import settings
 from app.choices import MessageIntentType
 from app.services.conversation_summary import ConversationSummaryService
+from app.services.log_formatter import LogFormatter
 from clients import OllamaClient
 
-from app.models import Bot, CronJob, Message
+from app.models import Bot, CronJob, Log, Message
 from app.utils import calculate_next_run_at
 from clients.telegram import TelegramRateLimitError
 from strings import NO_OLLAMA, OBJ_NOT_FOUND
@@ -174,7 +175,7 @@ def process_cron_job(self, job_id: str):
         processor = BotMessageProcessor(cron_job.bot, ollama, ollama_client)
 
         # Process cron job
-        result = processor.process_cron_job(
+        result, ollama_ms = processor.process_cron_job(
             name=cron_job.name, description=cron_job.description
         )
 
@@ -193,16 +194,48 @@ def process_cron_job(self, job_id: str):
         cron_job.last_run_at = timezone.now()
         cron_job.save(update_fields=["next_run_at", "last_run_at"])
 
+        # Success Log
+        desc = (
+            LogFormatter("process_cron_job")
+            .add("bot", cron_job.bot.name)
+            .add("job", cron_job.name)
+            .add(
+                "ollama",
+                f"{ollama_ms}ms" if ollama_ms else None,
+            )
+            .build()
+        )
+        Log.objects.create(bot=cron_job.bot, is_success=True, description=desc)
+
         logger.info(f"Cron job processing completed for bot: {cron_job.bot.name}")
         return "Processed cron job successfully"
 
     except TelegramRateLimitError as e:
+        if cron_job:
+            desc = (
+                LogFormatter("process_cron_job")
+                .add("bot", cron_job.bot.name)
+                .add("error", "TelegramRateLimitError")
+                .add("retry_after", f"{e.retry_after}s")
+                .build()
+            )
+            Log.objects.create(bot=cron_job.bot, is_success=False, description=desc)
+
         logger.warning(
             f"Telegram rate limit hit in process_cron_job, retrying in {e.retry_after}s"
         )
         raise self.retry(exc=e, countdown=e.retry_after)
 
     except Exception as e:
+        if cron_job:
+            desc = (
+                LogFormatter("process_cron_job")
+                .add("bot", cron_job.bot.name)
+                .add("error", type(e).__name__)
+                .build()
+            )
+            Log.objects.create(bot=cron_job.bot, is_success=False, description=desc)
+
         logger.error("Failed to process cron job", exc_info=True)
         # Retry with exponential backoff: 60s, 300s, 900s
         raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
@@ -244,7 +277,7 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
         processor = BotMessageProcessor(bot, ollama, ollama_client)
 
         # Process message
-        result = processor.process_message()
+        result, ollama_ms = processor.process_message()
 
         if result:
             # Kick-off intent classification process
@@ -268,10 +301,34 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
             )
             logger.info("Conversation summary task queued")
 
+        # Success Log
+        intent_label = MessageIntentType.get_readable(result.intent) if result else None
+        desc = (
+            LogFormatter("process_inbound_message")
+            .add("bot", bot.name)
+            .add("intent", intent_label)
+            .add(
+                "ollama",
+                f"{ollama_ms}ms" if ollama_ms else None,
+            )
+            .build()
+        )
+        Log.objects.create(bot=bot, is_success=True, description=desc)
+
         logger.info(f"Message processing completed for bot: {bot.name}")
         return "Processed inbound message successfully"
 
     except TelegramRateLimitError as e:
+        if bot:
+            desc = (
+                LogFormatter("process_inbound_message")
+                .add("bot", bot.name)
+                .add("error", "TelegramRateLimitError")
+                .add("retry_after", f"{e.retry_after}s")
+                .build()
+            )
+            Log.objects.create(bot=bot, is_success=False, description=desc)
+
         logger.warning(
             f"Telegram rate limit hit in process_inbound_message, "
             f"retrying in {e.retry_after}s"
@@ -279,6 +336,15 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
         raise self.retry(exc=e, countdown=e.retry_after)
 
     except Exception as e:
+        if bot:
+            desc = (
+                LogFormatter("process_inbound_message")
+                .add("bot", bot.name)
+                .add("error", type(e).__name__)
+                .build()
+            )
+            Log.objects.create(bot=bot, is_success=False, description=desc)
+
         logger.error("Failed to process inbound message", exc_info=True)
         # Retry with exponential backoff: 60s, 300s, 900s
         raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
@@ -371,18 +437,49 @@ def generate_report(self, bot_id: str, msg_id: str):
         generator = ReportGeneratorService(bot, ollama, ollama_client)
 
         # Generate and send report
-        result = generator.generate_and_send(message.content)
+        result, ollama_ms = generator.generate_and_send(message.content)
+
+        # Success Log
+        desc = (
+            LogFormatter("generate_report")
+            .add("bot", bot.name)
+            .add(
+                "ollama",
+                f"{ollama_ms}ms" if ollama_ms else None,
+            )
+            .build()
+        )
+        Log.objects.create(bot=bot, is_success=True, description=desc)
 
         logger.info(f"Report generated for bot: {bot.name}")
         return result
 
     except TelegramRateLimitError as e:
+        if bot:
+            desc = (
+                LogFormatter("generate_report")
+                .add("bot", bot.name)
+                .add("error", "TelegramRateLimitError")
+                .add("retry_after", f"{e.retry_after}s")
+                .build()
+            )
+            Log.objects.create(bot=bot, is_success=False, description=desc)
+
         logger.warning(
             f"Telegram rate limit hit in generate_report, retrying in {e.retry_after}s"
         )
         raise self.retry(exc=e, countdown=e.retry_after)
 
     except Exception as e:
+        if bot:
+            desc = (
+                LogFormatter("generate_report")
+                .add("bot", bot.name)
+                .add("error", type(e).__name__)
+                .build()
+            )
+            Log.objects.create(bot=bot, is_success=False, description=desc)
+
         logger.error("Failed to generate report", exc_info=True)
         # Retry with exponential backoff
         raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
