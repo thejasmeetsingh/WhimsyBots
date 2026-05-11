@@ -5,6 +5,7 @@ services:
   db:
     image: postgres:16-alpine
     container_name: db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
@@ -12,15 +13,24 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL",  "pg_isready -d ${DB_NAME} -U ${DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -d ${DB_NAME} -U ${DB_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
 
   # Redis Broker
   redis:
     image: redis:7-alpine
     container_name: redis
+    restart: unless-stopped
     volumes:
       - redis_data:/data
     healthcheck:
@@ -28,11 +38,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
 
   # Django Web Application
   app:
     build: .
     container_name: app
+    restart: unless-stopped
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
@@ -55,11 +74,20 @@ services:
       start_period: 40s
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
 
   # Celery Worker
   celery_worker:
     build: .
     container_name: celery_worker
+    restart: unless-stopped
     command: celery -A whimsybots worker -Q beat,default -l INFO
     env_file: .env
     volumes:
@@ -69,11 +97,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1.5G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
 
   # Celery Beat (scheduler)
   celery_beat:
     build: .
     container_name: celery_beat
+    restart: unless-stopped
     command: celery -A whimsybots beat -l INFO
     env_file: .env
     volumes:
@@ -83,10 +122,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-  
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+        reservations:
+          cpus: "0.1"
+          memory: 192M
+
   # Celery Flower
   celery_flower:
     image: mher/flower:2.0
+    container_name: celery_flower
+    restart: unless-stopped
     command: celery --broker=${CELERY_BROKER_URL} flower --basic-auth=${CELERY_FLOWER_USERNAME}:${CELERY_FLOWER_PASSWORD}
     ports:
       - "5555:5555"
@@ -94,10 +143,16 @@ services:
       - CELERY_BROKER_URL=${CELERY_BROKER_URL}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
 
 volumes:
   postgres_data:
