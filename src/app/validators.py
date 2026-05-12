@@ -3,9 +3,11 @@ Custom Django validators for WhimsyBots models.
 
 This module provides field-level validation functions for:
 - Cron expression syntax validation
-- Bot scheduling configuration validation
 - MCP server transport type validation
+- Ollama keep alive validation
 """
+
+import re
 
 from croniter import croniter
 from django.core.exceptions import ValidationError
@@ -87,4 +89,28 @@ def validate_transport_fields(transport_type: str, cmd: str, endpoint: str) -> N
         raise ValidationError(
             "HTTPS endpoint must be provided for REMOTE transport type. "
             "Specify the URL of the remote MCP server."
+        )
+
+
+def validate_keep_alive(value: str):
+    """
+    Validate Ollama keep_alive duration string.
+
+    Accepts:
+        -1          → never unload model from memory
+        0           → unload immediately after request
+        <int>s      → seconds  (e.g. "30s")
+        <int>m      → minutes  (e.g. "10m")
+        <int>h      → hours    (e.g. "1h")
+
+    Raises:
+        ValidationError: If value doesn't match any accepted format
+    """
+
+    pattern = r"^(-1|0|\d+[smh])$"
+    if not re.match(pattern, value.strip()):
+        raise ValidationError(
+            f"'{value}' is not a valid keep_alive value. "
+            "Use -1 (never unload), 0 (unload immediately), "
+            "or a duration like 30s, 10m, 1h."
         )
