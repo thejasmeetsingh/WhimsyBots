@@ -17,6 +17,7 @@ def run_tool_calling_loop(
     history: list[dict[str, Any]],
     tools_config: list,
     ollama: Ollama,
+    add_keep_alive: bool = False,
     format: Optional[dict] = None,
 ) -> tuple[str, Optional[int]]:
     """
@@ -28,6 +29,7 @@ def run_tool_calling_loop(
         history: Message history list with role and content
         tools_config: List of tool configurations from MCPToolsBuilder
         ollama: Ollama configuration with temperature, num_ctx, num_predict
+        add_keep_alive: A flag param to indetify when to pass the keep_alive param
         format (Optional): A strucutred format of the response
 
     Returns:
@@ -45,6 +47,7 @@ def run_tool_calling_loop(
             response = ollama_client.chat(
                 model=model,
                 messages=history,
+                keep_alive=ollama.keep_alive if add_keep_alive else None,
                 tools=[tool.tool for tool in tools_config],
                 format=format,
                 options={

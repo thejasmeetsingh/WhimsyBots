@@ -5,6 +5,8 @@ Provides a high-level interface for interacting with Ollama, a local language mo
 Handles model listing, chat completions, and tool calling functionality.
 """
 
+from typing import Optional
+
 import ollama
 
 
@@ -114,9 +116,10 @@ class OllamaClient:
         self,
         model: str,
         messages: list[dict],
-        tools: list[dict] = None,
-        format: dict = None,
-        options: dict = None,
+        keep_alive: Optional[str] = None,
+        tools: Optional[list[dict]] = None,
+        format: Optional[dict] = None,
+        options: Optional[dict] = None,
     ) -> dict:
         """
         Send a chat message to Ollama and get a response.
@@ -127,6 +130,7 @@ class OllamaClient:
             model (str): Model name to use (e.g., 'mistral', 'llama2')
             messages (list[dict]): Chat history in Ollama format
                 Each message: {"role": "user|assistant|system", "content": "..."}
+            keep_alive (str | None): Model keep-alive duration
             tools (list[dict] | None): Available tools for function calling
                 Format: Tool definitions in OpenAI function calling format
             format (dict | None): Output format specification
@@ -180,8 +184,17 @@ class OllamaClient:
             ... )
         """
 
+        if keep_alive:
+            keep_alive = keep_alive.strip()
+            keep_alive = int(keep_alive) if keep_alive in {"-1", "0"} else keep_alive
+
         response = self._client.chat(
-            model=model, messages=messages, tools=tools, format=format, options=options
+            model=model,
+            messages=messages,
+            keep_alive=keep_alive,
+            tools=tools,
+            format=format,
+            options=options,
         )
         message = response.message
         total_duration_ns = response.total_duration

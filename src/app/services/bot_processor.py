@@ -188,6 +188,7 @@ class BotMessageProcessor:
                 history=history,
                 tools_config=tools_config,
                 ollama=self.ollama,
+                add_keep_alive=True,
                 format=StructuredOutput.model_json_schema(),
             )
 
