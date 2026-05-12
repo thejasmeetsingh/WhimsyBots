@@ -18,7 +18,11 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.validators import URLValidator
 from martor.models import MartorField
 
-from app.validators import validate_cron_expression, validate_transport_fields
+from app.validators import (
+    validate_cron_expression,
+    validate_keep_alive,
+    validate_transport_fields,
+)
 from app.choices import MCPTransportType, MessageIntentType, MessageRole
 
 
@@ -66,6 +70,14 @@ class Ollama(BaseModel):
     )
     num_ctx = models.PositiveIntegerField(
         default=4096, help_text="Context window size in tokens"
+    )
+    keep_alive = models.CharField(
+        max_length=10,
+        default="10m",
+        validators=[validate_keep_alive],
+        help_text="How long to keep model loaded between requests. "
+        "Use -1 (never unload), 0 (unload immediately), "
+        "or a duration like 30s, 10m, 1h.",
     )
     num_predict = models.PositiveIntegerField(
         null=True,
