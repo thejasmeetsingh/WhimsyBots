@@ -9,14 +9,18 @@ This module provides helper functions for:
 - Message format conversions
 """
 
+import re
+import base64
+import hashlib
 import logging
 from io import BytesIO
-import re
 from typing import Optional, Dict, List
+from cryptography.fernet import Fernet
 
 from weasyprint import HTML
 from croniter import croniter
 from django.utils import timezone
+from django.conf import settings
 
 
 logger = logging.getLogger(__name__)
@@ -404,3 +408,25 @@ def extract_html(text: str) -> Optional[str]:
         return text[first:last].strip()
 
     return None
+
+
+def get_fernet():
+    """Derive a valid Fernet key from Django's SECRET_KEY."""
+
+    key = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
+    encoded_key = base64.urlsafe_b64encode(key)  # Fernet expects base64
+    return Fernet(encoded_key)
+
+
+def encrypt(plaintext: str) -> str:
+    """Encrypt the given plaintext"""
+
+    f = get_fernet()
+    return f.encrypt(plaintext.encode()).decode()
+
+
+def decrypt(ciphertext: str) -> str:
+    """Decrypt the given ciphertext"""
+
+    f = get_fernet()
+    return f.decrypt(ciphertext.encode()).decode()
