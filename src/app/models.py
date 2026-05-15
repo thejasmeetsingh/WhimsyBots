@@ -11,6 +11,7 @@ This module defines the core data models:
 """
 
 import uuid
+import hashlib
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -18,6 +19,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.validators import URLValidator
 from martor.models import MartorField
 
+from app.fields import EncryptedCharField, EncryptedJSONField
 from app.validators import (
     validate_cron_expression,
     validate_keep_alive,
@@ -58,8 +60,7 @@ class Ollama(BaseModel):
         blank=True,
         help_text="Default model name when not specified per-bot",
     )
-    api_key = models.CharField(
-        max_length=100,
+    api_key = EncryptedCharField(
         null=True,
         blank=True,
         help_text="Optional API key for Ollama authentication",
@@ -122,8 +123,11 @@ class Bot(BaseModel):
     )
 
     # Telegram Communication
-    telegram_bot_token = models.CharField(
-        max_length=255, unique=True, help_text="Telegram bot API token from BotFather"
+    telegram_bot_token = EncryptedCharField(
+        help_text="Telegram bot API token from BotFather"
+    )
+    telegram_bot_token_hash = models.CharField(
+        max_length=64, unique=True, editable=False
     )
     telegram_chat_id = models.CharField(
         max_length=255,
@@ -136,6 +140,15 @@ class Bot(BaseModel):
         ordering = ("-created_at",)
         verbose_name = "Bot"
         verbose_name_plural = "Bots"
+
+    def save(self, *args, **kwargs):
+        if self.telegram_bot_token:
+            # Save encrypted telegram_bot_token hash
+            # Deterministic — same input always gives same hash
+            self.telegram_bot_token_hash = hashlib.sha256(
+                self.telegram_bot_token.encode()
+            ).hexdigest()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -175,8 +188,7 @@ class MCPServer(BaseModel):
         blank=True,
         help_text="Command arguments as comma-seperated list (e.g., -y, @modelcontextprotocol/server-memory)",
     )
-    secrets = models.JSONField(
-        default=dict,
+    secrets = EncryptedJSONField(
         null=True,
         blank=True,
         help_text="Environment variables (LOCAL) or HTTP headers (REMOTE) as JSON dict",
