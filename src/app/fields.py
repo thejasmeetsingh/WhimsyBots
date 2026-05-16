@@ -2,7 +2,6 @@ import json
 
 from django import forms
 from django.db import models
-from django.core.exceptions import ValidationError
 
 from app.utils import encrypt, decrypt
 
@@ -12,6 +11,7 @@ class EncryptedCharField(models.TextField):
 
     def from_db_value(self, value, expression, connection):
         """Called when data is loaded FROM the database."""
+
         if value is None:
             return value
         try:
@@ -42,22 +42,18 @@ class EncryptedCharField(models.TextField):
             return encrypt(value)  # plaintext coming in → encrypt it
 
     def formfield(self, **kwargs):
-        kwargs.update({"widget": forms.TextInput})
+        kwargs.update(
+            {"widget": forms.TextInput}
+        )  # Use the conventional widget similar to CharField
         return super().formfield(**kwargs)
 
 
 class EncryptedJSONField(models.TextField):
     """Stores encrypted JSON. Returns dict on read, encrypts on write."""
 
-    def _validate_json(self, value):
-        if isinstance(value, (dict, list)):
-            return  # already a valid Python object
-        try:
-            json.loads(value)
-        except (json.JSONDecodeError, TypeError) as e:
-            raise ValidationError(f"Enter valid JSON. Error: {e}", code="invalid_json")
-
     def from_db_value(self, value, expression, connection):
+        """Called when data is loaded FROM the database."""
+
         if value is None:
             return value
         try:
@@ -66,6 +62,8 @@ class EncryptedJSONField(models.TextField):
             return value
 
     def to_python(self, value):
+        """Called during form validation / deserialization."""
+
         if value is None:
             return value
         if isinstance(value, (dict, list)):
@@ -79,6 +77,8 @@ class EncryptedJSONField(models.TextField):
                 return value
 
     def get_prep_value(self, value):
+        """Called when writing TO the database."""
+
         if value is None:
             return value
         if isinstance(value, (dict, list)):
@@ -88,26 +88,3 @@ class EncryptedJSONField(models.TextField):
             return value  # already encrypted
         except Exception:
             return encrypt(value)
-
-    def validate(self, value, model_instance):
-        """Model-level validation — fires on full_clean()."""
-
-        super().validate(value, model_instance)
-        if value is not None:
-            self._validate_json(value)
-
-    def formfield(self, **kwargs):
-        """Form-level validation — fires on admin Save."""
-
-        validate_json = self._validate_json
-
-        class JSONFormField(forms.CharField):
-            widget = forms.Textarea
-
-            def validate(self, value):
-                super().validate(value)
-                if value:
-                    validate_json(value)
-
-        kwargs.setdefault("form_class", JSONFormField)
-        return super().formfield(**kwargs)
