@@ -4,7 +4,9 @@ from typing import Optional
 from django import forms
 
 from app.models import Ollama, Bot
+from app.utils import get_token_hash
 from clients import OllamaClient
+from strings import UNIQUE_TELEGRAM_TOKEN_ERROR
 
 
 logger = logging.getLogger(__name__)
@@ -131,6 +133,37 @@ class BotForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._populate_model_choices()
+
+    def clean(self):
+        """
+        Validate form data with custom checks for unique telegram bot token.
+
+        Ensures that the provided telegram_bot_token is unique across all Bot instances,
+        excluding the current instance if it's being updated.
+
+        Raises:
+            ValidationError: If the telegram_bot_token already exists for another bot
+
+        Returns:
+            dict: The cleaned form data
+        """
+
+        cleaned_data = super().clean()
+        telegram_bot_token = cleaned_data.get("telegram_bot_token")
+
+        if telegram_bot_token:
+            telegram_bot_token_hash = get_token_hash(telegram_bot_token)
+            qs = Bot.objects.filter(
+                telegram_bot_token_hash__exact=telegram_bot_token_hash
+            )
+
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+
+            if qs.exists():
+                self.add_error("telegram_bot_token", UNIQUE_TELEGRAM_TOKEN_ERROR)
+
+        return cleaned_data
 
     def _populate_model_choices(self) -> None:
         """
