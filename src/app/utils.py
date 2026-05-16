@@ -430,3 +430,9 @@ def decrypt(ciphertext: str) -> str:
 
     f = get_fernet()
     return f.decrypt(ciphertext.encode()).decode()
+
+
+def get_token_hash(token: str) -> str:
+    """Generate hex digest for the given token"""
+
+    return hashlib.sha256(token.encode()).hexdigest()

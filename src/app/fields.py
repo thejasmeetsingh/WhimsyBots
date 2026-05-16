@@ -42,7 +42,7 @@ class EncryptedCharField(models.TextField):
             return encrypt(value)  # plaintext coming in → encrypt it
 
     def formfield(self, **kwargs):
-        kwargs.setdefault("widget", forms.TextInput)
+        kwargs.update({"widget": forms.TextInput})
         return super().formfield(**kwargs)
 
 
