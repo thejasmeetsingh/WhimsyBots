@@ -3,7 +3,7 @@ from typing import Optional
 
 from django import forms
 
-from app.models import Ollama, Bot
+from app.models import MCPServer, Ollama, Bot
 from app.utils import get_token_hash
 from clients import OllamaClient
 from strings import UNIQUE_TELEGRAM_TOKEN_ERROR
@@ -185,3 +185,16 @@ class BotForm(forms.ModelForm):
             self.fields["ollama_model"].choices = format_model_choices(
                 models, preferred_model=default_model
             )
+
+
+class MCPServerForm(forms.ModelForm):
+    """
+    Form for MCP Server configuration.
+    Created to represent 'secrets' field as a valid JSONField.
+    """
+
+    secrets = forms.JSONField(required=False)
+
+    class Meta:
+        model = MCPServer
+        fields = "__all__"
