@@ -3,7 +3,7 @@ from django.utils.html import format_html
 
 from app.choices import MessageRole
 from app.models import CronJob, Ollama, Bot, MCPServer, Message, Log
-from app.forms import OllamaForm, BotForm
+from app.forms import MCPServerForm, OllamaForm, BotForm
 from app.tasks import manage_conversation_summary, setup_bot_webhook
 from app.utils import get_admin_link
 
@@ -238,7 +238,7 @@ class BotAdmin(admin.ModelAdmin):
             # Existing bot - check if token changed
             if "telegram_bot_token" in form.changed_data:
                 should_setup_webhook = True
-        print("should_setup_webhook: ", should_setup_webhook)
+
         if should_setup_webhook:
             # Queue webhook setup task
             setup_bot_webhook.apply_async(
@@ -253,10 +253,11 @@ class MCPServerAdmin(BaseUserFilteredAdmin):
     Allows creation and management of Model Context Protocol servers per bot.
     """
 
+    form = MCPServerForm
     list_display = ("bot", "name", "is_active", "transport", "created_at")
     list_filter = ("is_active", "transport", "created_at")
     autocomplete_fields = ("bot",)
-    readonly_fields = ("created_at",)
+    readonly_fields = ("created_at", "updated_at")
     search_fields = ("name", "bot__name")
     fields = (
         "bot",
