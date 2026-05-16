@@ -11,7 +11,7 @@ from app.services.log_formatter import LogFormatter
 from clients import OllamaClient
 
 from app.models import Bot, CronJob, Log, Message
-from app.utils import calculate_next_run_at
+from app.utils import calculate_next_run_at, get_token_hash
 from clients.telegram import TelegramRateLimitError
 from strings import NO_OLLAMA, OBJ_NOT_FOUND
 from whimsybots.celery import task as celery
@@ -33,7 +33,8 @@ def telegram_msg_handler(self, bot_token: str, update: dict):
 
     try:
         # Fetch active bots
-        bot = Bot.objects.get(telegram_bot_token=bot_token)
+        bot_token_hash = get_token_hash(bot_token)
+        bot = Bot.objects.get(telegram_bot_token_hash=bot_token_hash)
         TelegramUpdateHandler.handle_update(bot, update)
     except Bot.DoesNotExist:
         logger.error(f"Bot with token {bot_token} not found")
