@@ -11,7 +11,6 @@ This module defines the core data models:
 """
 
 import uuid
-import hashlib
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -20,6 +19,7 @@ from django.core.validators import URLValidator
 from martor.models import MartorField
 
 from app.fields import EncryptedCharField, EncryptedJSONField
+from app.utils import get_token_hash
 from app.validators import (
     validate_cron_expression,
     validate_keep_alive,
@@ -131,7 +131,6 @@ class Bot(BaseModel):
     )
     telegram_chat_id = models.CharField(
         max_length=255,
-        unique=True,
         null=True,
         help_text="Telegram chat ID (auto-populated on first message)",
     )
@@ -145,9 +144,7 @@ class Bot(BaseModel):
         if self.telegram_bot_token:
             # Save encrypted telegram_bot_token hash
             # Deterministic — same input always gives same hash
-            self.telegram_bot_token_hash = hashlib.sha256(
-                self.telegram_bot_token.encode()
-            ).hexdigest()
+            self.telegram_bot_token_hash = get_token_hash(self.telegram_bot_token)
         return super().save(*args, **kwargs)
 
     def __str__(self):
