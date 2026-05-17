@@ -153,9 +153,10 @@ Global Ollama LLM configuration. Only one instance should exist (enforced via ad
 class Ollama(BaseModel):
     endpoint        = models.URLField(default="http://localhost:11434")
     default_model   = models.CharField(max_length=50, null=True, blank=True)
-    api_key         = models.CharField(max_length=100, null=True, blank=True)
+    api_key         = EncryptedCharField(null=True, blank=True)  # Encrypted
     temperature     = models.FloatField(default=0.7)
     num_ctx         = models.PositiveIntegerField(default=4096)
+    keep_alive      = models.CharField(max_length=10, default="10m")  # Model keep-alive duration
     num_predict     = models.PositiveIntegerField(null=True, blank=True)
 ```
 
@@ -174,8 +175,9 @@ class Bot(BaseModel):
     system_prompt       = MartorField(null=True, blank=True)  # Markdown support
     
     # Telegram Communication
-    telegram_bot_token  = models.CharField(max_length=255, unique=True)
-    telegram_chat_id    = models.CharField(max_length=255, unique=True, null=True)
+    telegram_bot_token  = EncryptedCharField()  # Encrypted
+    telegram_bot_token_hash = models.CharField(max_length=64, unique=True)  # For token lookup
+    telegram_chat_id    = models.CharField(max_length=255, null=True)  # Auto-populated on first message
 ```
 
 #### `MCPServer`
@@ -189,7 +191,7 @@ class MCPServer(BaseModel):
     command     = models.CharField(max_length=10, null=True, blank=True)  # For LOCAL: python, npx, uv
     endpoint    = models.URLField(null=True, blank=True)  # For REMOTE: HTTPS URL
     args        = ArrayField(base_field=models.CharField(max_length=500), default=list)
-    secrets     = models.JSONField(default=dict, null=True, blank=True)
+    secrets     = EncryptedJSONField(default=dict, null=True, blank=True)  # Encrypted environment variables/headers
     is_active   = models.BooleanField(default=True)
 ```
 
@@ -287,10 +289,11 @@ Handles incoming Telegram webhook updates by fetching the bot and calling Telegr
 ```python
 @celery.task(bind=True, max_retries=3)
 def telegram_msg_handler(bot_token: str, update: dict):
-    # 1. Fetch bot by token
+    # 1. Fetch bot by token_hash (lookup via get_token_hash())
     # 2. Call TelegramUpdateHandler.handle_update(bot, update)
     # 3. Stores message and queues process_inbound_message
-    # 4. Retry on failure with exponential backoff
+    # 4. Handles Telegram rate limit errors with retry + exponential backoff
+    # 5. Logs comprehensive task information via LogFormatter
 ```
 
 #### `process_inbound_message`
@@ -303,12 +306,15 @@ def process_inbound_message(bot_id: str, msg_id: str):
     # 2. Initialize BotMessageProcessor
     # 3. BotMessageProcessor.process_message():
     #    - Builds tools from bot's MCPServers + default servers (time, cron_job)
+    #    - Sends responsive typing indicators during processing
     #    - Runs Ollama tool_calling_loop with StructuredOutput JSON schema
     #    - Returns {intent: J|R|Q|CJ|O, response: string}
     # 4. Store intent in Message.intent field
-    # 5. Send response via Telegram
+    # 5. Send response via Telegram with intelligent message splitting (>4096 chars)
     # 6. If intent=='R': queue generate_report task
-    # 7. Retry on failure with exponential backoff
+    # 7. If context window approaching limit: queue manage_conversation_summary task
+    # 8. Handles Telegram rate limit errors with retry + exponential backoff
+    # 9. Retry on failure with exponential backoff
 ```
 
 #### `process_cron_job`
@@ -339,10 +345,26 @@ def generate_report(bot_id: str):
     # 2. Generate HTML report via Ollama with REPORT_GENERATION_PROMPT
     # 3. Extract HTML from LLM response (handles markdown wrappers)
     # 4. Convert HTML to PDF via WeasyPrint
-    # 5. Send PDF via TelegramClient.send_document()
-    # 6. Send confirmation message
+    # 5. Send PDF via TelegramClient.send_document() with summary message
+    # 6. Send confirmation message with intelligent message splitting
     # 7. Store bot's response message to DB
-    # 8. Retry on failure with exponential backoff
+    # 8. Handles Telegram rate limit errors with retry + exponential backoff
+    # 9. Retry on failure with exponential backoff
+```
+
+#### `manage_conversation_summary`
+Manages conversation context window by summarizing old messages when context approaches limit.
+
+```python
+@celery.task(bind=True, max_retries=3)
+def manage_conversation_summary(bot_id: str):
+    # 1. Fetch recent conversation messages for bot
+    # 2. Check if context window is approaching limit
+    # 3. Initialize ConversationSummaryService
+    # 4. Generate summary of old messages via Ollama
+    # 5. Replace old messages with summary message
+    # 6. Maintain recent messages for immediate context
+    # 7. Retry on failure with exponential backoff
 ```
 
 #### `setup_bot_webhook`
@@ -420,8 +442,9 @@ class TelegramUpdateHandler:
         # 1. Parse update (extract message_id, chat_id, text)
         # 2. Update bot.telegram_chat_id if not set
         # 3. Create Message record (role=USER)
-        # 4. Send typing action
+        # 4. Send typing action (responsive to LLM processing time)
         # 5. Queue process_inbound_message task
+        # 6. Handle Telegram rate limits gracefully
 ```
 
 ### 6.5 Message Flow
@@ -432,13 +455,14 @@ Telegram User Message
   → Webhook/Polling
   → TelegramUpdateHandler.handle_update()
   → Message saved to DB (role=USER)
-  → Typing indicator sent
+  → Typing indicator sent (responsive)
   → process_inbound_message task queued
   → BotMessageProcessor processes with tools
-  → Response sent via TelegramClient.send_message()
-  → Response saved to DB (role=ASSISTANT)
-  → classify_intent task queued
+  → Response sent via TelegramClient.send_message() (intelligent splitting for >4096 chars)
+  → Response saved to DB (role=ASSISTANT) with embedded intent classification
   → If REPORT intent: generate_report task queued
+  → If context window near limit: manage_conversation_summary task queued
+  → If Telegram rate limited: retry with exponential backoff
 ```
 
 #### Outbound (Scheduled Cron Job)
@@ -918,29 +942,28 @@ services:
 | Django project structure | ✅ | Full setup with whimsybots config |
 | Data models | ✅ | All models with UUID primary keys + CronJob description field |
 | Django admin | ✅ | Customized with inlines, filters |
-| Ollama client | ✅ | Full chat + tool calling with JSON schema format support |
-| Telegram client | ✅ | send_message, send_document, typing, webhook |
+| Ollama client | ✅ | Full chat + tool calling with JSON schema format support + keep_alive support |
+| Ollama keep-alive | ✅ | keep_alive field on Ollama model with validation |
+| Telegram client | ✅ | send_message, send_document, typing, webhook + rate limit handling + intelligent message splitting |
+| Telegram token encryption | ✅ | telegram_bot_token encrypted + token_hash for lookup |
 | MCP client | ✅ | Local + remote transport support with stdio and HTTP |
-| Celery tasks | ✅ | All core tasks: telegram_msg_handler, process_inbound_message, process_cron_job, generate_report, setup_bot_webhook |
+| Celery tasks | ✅ | All core tasks: telegram_msg_handler, process_inbound_message, process_cron_job, generate_report, manage_conversation_summary, setup_bot_webhook |
 | Tool calling loop | ✅ | Async tool execution with Ollama via tool_calling_coordinator |
 | StructuredOutput | ✅ | Pydantic-based JSON schema for intent + response |
 | Embedded intent detection | ✅ | Intent classification integrated into process_message with JSON schema format |
-| Report generation | ✅ | HTML → PDF → Telegram (async via generate_report task) |
+| Report generation | ✅ | HTML → PDF → Telegram (async via generate_report task) with summary support |
 | Cron job processing | ✅ | Dedicated process_cron_job task with CronJob.description support |
 | Default MCP servers | ✅ | Time server + Cron Job Manager (FastMCP) injected automatically |
 | Cron Job MCP Server | ✅ | Standalone module with list/create/update/delete tools (FastMCP) |
 | Multi-queue Celery | ✅ | beat + default queues |
-| Structured logging | ✅ | JSON logging configured |
+| Comprehensive logging | ✅ | JSON logging configured with LogFormatter for descriptions |
 | Async database | ✅ | asyncpg for cron_job MCP server database access |
-
-### 🚧 In Progress / Future
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Encryption for secrets | ⏳ | MCPServer.secrets currently plaintext JSON |
-| Monitoring/observability | ⏳ | Metrics, tracing, alerting via Prometheus/Grafana |
-| Rate limiting | ⏳ | Telegram API rate limit handling per bot |
-| Message chunking optimization | ⏳ | Smart splitting for LLM responses > 4096 chars |
+| Encryption for secrets | ✅ | EncryptedCharField for api_key, EncryptedJSONField for MCPServer.secrets |
+| Telegram rate limiting | ✅ | Rate limit retry handling with exponential backoff in tasks |
+| Message splitting | ✅ | Intelligent message splitting for responses > 4096 chars |
+| Typing indicators | ✅ | Responsive typing indicators during processing |
+| Conversation context management | ✅ | ConversationSummaryService with manage_conversation_summary task |
+| Celery Flower monitoring | ✅ | Monitoring service in docker-compose |
 
 ---
 
