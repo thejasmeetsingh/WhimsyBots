@@ -15,8 +15,9 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import User
 from django.contrib.postgres.fields import ArrayField
-from django.core.validators import URLValidator
+from django.core.validators import URLValidator, MinValueValidator
 from martor.models import MartorField
+from pgvector.django import VectorField
 
 from app.fields import EncryptedCharField, EncryptedJSONField
 from app.utils import get_token_hash
@@ -54,12 +55,6 @@ class Ollama(BaseModel):
         validators=[URLValidator(schemes=["http", "https"])],
         help_text="Ollama API endpoint URL",
     )
-    default_model = models.CharField(
-        max_length=50,
-        null=True,
-        blank=True,
-        help_text="Default model name when not specified per-bot",
-    )
     api_key = EncryptedCharField(
         null=True,
         blank=True,
@@ -70,7 +65,9 @@ class Ollama(BaseModel):
         help_text="Controls randomness in generation (0.0-1.0, higher = more random)",
     )
     num_ctx = models.PositiveIntegerField(
-        default=4096, help_text="Context window size in tokens"
+        default=4096,
+        help_text="Context window size in tokens",
+        validators=[MinValueValidator(limit_value=4096)],
     )
     keep_alive = models.CharField(
         max_length=10,
@@ -112,14 +109,27 @@ class Bot(BaseModel):
     # LLM Configuration
     ollama_model = models.CharField(
         max_length=50,
-        null=True,
-        blank=True,
-        help_text="Specific Ollama model (overrides default from Ollama config)",
+        help_text="Support is limited to models with tool calling capabilities",
+    )
+    embedding_model = models.CharField(
+        max_length=50,
+        help_text="Model used for vector embeddings. Run: 'ollama pull nomic-embed-text' if no embedding model installed",
+    )
+    embedding_dimensions = models.PositiveIntegerField(
+        default=768,
+        help_text="Must match your chosen embedding model. Changing this requires re-embedding all messages.",
     )
     system_prompt = MartorField(
         null=True,
         blank=True,
         help_text="System prompt for LLM interactions (supports Markdown)",
+    )
+
+    # Personalization
+    observed_patterns = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Patterns observed by the model to shape conversation",
     )
 
     # Telegram Communication
@@ -222,7 +232,9 @@ class Message(BaseModel):
     intent = models.CharField(
         max_length=2, choices=MessageIntentType.get_values(), null=True, blank=True
     )
+    is_report = models.BooleanField(default=False)
     content = models.TextField()
+    content_embedding = VectorField()
 
     class Meta:
         ordering = ("-created_at",)
