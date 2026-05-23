@@ -213,3 +213,85 @@ class OllamaClient:
         }
 
         return result
+
+    def generate_embeddings(
+        self,
+        model: str,
+        text: str,
+        truncate: Optional[bool] = None,
+        options: Optional[dict] = None,
+        keep_alive: Optional[str] = None,
+        dimensions: Optional[int] = None,
+    ) -> list[float]:
+        """
+        Generate embeddings for a given text using Ollama.
+
+        Args:
+            model (str): Model name to use for embeddings (e.g., 'nomic-embed-text', 'mxbai-embed-large')
+            text (str): Text to generate embeddings for
+            truncate (bool): truncate inputs that exceed the context window
+            options (dict | None): Model-specific options
+                Common options:
+                - "temperature" (float): 0.0-1.0, controls randomness
+                - "num_ctx" (int): Context window size in tokens
+                - "num_predict" (int): Max tokens to generate
+            keep_alive (str | None): Model keep-alive duration
+                Default: None (uses Ollama default)
+            dimensions (int | None): Number of dimensions to generate embeddings for
+
+        Returns:
+            list[float]: List of embedding vectors (typically 768 or 1024 dimensions)
+
+        Raises:
+            ollama.ResponseError: If Ollama API call fails or model not found
+
+        Example:
+            >>> client = OllamaClient()
+            >>> response = client.embed(
+            ...     model='nomic-embed-text',
+            ...     input='The quick brown fox jumps over the lazy dog'
+            ... )
+            >>> print(len(response.embeddings))  # 768 (for nomic-embed-text)
+            >>> print(response.embeddings[:5])   # First 5 embedding values
+        """
+
+        if keep_alive:
+            keep_alive = keep_alive.strip()
+            keep_alive = int(keep_alive) if keep_alive in {"-1", "0"} else keep_alive
+
+        response = self._client.embed(
+            model=model,
+            input=text,
+            truncate=truncate,
+            options=options,
+            keep_alive=keep_alive,
+            dimensions=dimensions,
+        )
+
+        # Ollama returns embeddings as a list of floats
+        return response.embeddings
+
+    def fetch_model_capabilities(self, model: str) -> list[str]:
+        """
+        Fetch capabilities of a given model.
+
+        Args:
+            model (str): Model name to fetch details for (e.g., 'llama2', 'mistral')
+
+        Returns:
+            list[str]: capabilities
+
+        Raises:
+            ollama.ResponseError: If Ollama API call fails or model not found
+
+        Example:
+            >>> client = OllamaClient()
+            >>> capabilities = client.fetch_model_capabilities('mistral')
+            >>> print(capabilities)
+            ["completion", "vision"]
+        """
+
+        response = self._client.show(model=model)
+
+        # Convert response to dictionary
+        return response.capabilities
