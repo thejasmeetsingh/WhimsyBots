@@ -1,0 +1,429 @@
+import app.fields
+import app.validators
+import django.contrib.postgres.fields
+import django.core.validators
+import django.db.models.deletion
+import martor.models
+import pgvector.django.vector
+import uuid
+from django.conf import settings
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    initial = True
+
+    dependencies = [
+        ("app", "0001_enable_pgvector"),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name="Ollama",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        db_index=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        unique=True,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "endpoint",
+                    models.URLField(
+                        default="http://localhost:11434",
+                        help_text="Ollama API endpoint URL",
+                        validators=[
+                            django.core.validators.URLValidator(
+                                schemes=["http", "https"]
+                            )
+                        ],
+                    ),
+                ),
+                (
+                    "api_key",
+                    app.fields.EncryptedCharField(
+                        blank=True,
+                        help_text="Optional API key for Ollama authentication",
+                        null=True,
+                    ),
+                ),
+                (
+                    "temperature",
+                    models.FloatField(
+                        default=0.7,
+                        help_text="Controls randomness in generation (0.0-1.0, higher = more random)",
+                    ),
+                ),
+                (
+                    "num_ctx",
+                    models.PositiveIntegerField(
+                        default=4096,
+                        help_text="Context window size in tokens",
+                        validators=[
+                            django.core.validators.MinValueValidator(limit_value=4096)
+                        ],
+                    ),
+                ),
+                (
+                    "keep_alive",
+                    models.CharField(
+                        default="10m",
+                        help_text="How long to keep model loaded between requests. Use -1 (never unload), 0 (unload immediately), or a duration like 30s, 10m, 1h.",
+                        max_length=10,
+                        validators=[app.validators.validate_keep_alive],
+                    ),
+                ),
+                (
+                    "num_predict",
+                    models.PositiveIntegerField(
+                        blank=True,
+                        help_text="Max tokens to generate (leave it blank = infinite/default)",
+                        null=True,
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "Ollama",
+                "verbose_name_plural": "Ollama",
+            },
+        ),
+        migrations.CreateModel(
+            name="Bot",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        db_index=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        unique=True,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("name", models.CharField()),
+                ("description", models.TextField(blank=True, null=True)),
+                (
+                    "is_active",
+                    models.BooleanField(
+                        default=True,
+                        help_text="Whether this bot is active and should be scheduled",
+                    ),
+                ),
+                (
+                    "ollama_model",
+                    models.CharField(
+                        help_text="Support is limited to models with tool calling capabilities",
+                        max_length=50,
+                    ),
+                ),
+                (
+                    "embedding_model",
+                    models.CharField(
+                        help_text="Model used for vector embeddings. Run: 'ollama pull nomic-embed-text' if no embedding model installed",
+                        max_length=50,
+                    ),
+                ),
+                (
+                    "embedding_dimensions",
+                    models.PositiveIntegerField(
+                        default=768,
+                        help_text="Must match your chosen embedding model. Changing this requires re-embedding all messages.",
+                    ),
+                ),
+                (
+                    "system_prompt",
+                    martor.models.MartorField(
+                        blank=True,
+                        help_text="System prompt for LLM interactions (supports Markdown)",
+                        null=True,
+                    ),
+                ),
+                (
+                    "observed_patterns",
+                    models.TextField(
+                        blank=True,
+                        help_text="Patterns observed by the model to shape conversation",
+                        null=True,
+                    ),
+                ),
+                (
+                    "telegram_bot_token",
+                    app.fields.EncryptedCharField(
+                        help_text="Telegram bot API token from BotFather"
+                    ),
+                ),
+                (
+                    "telegram_bot_token_hash",
+                    models.CharField(editable=False, max_length=64, unique=True),
+                ),
+                (
+                    "telegram_chat_id",
+                    models.CharField(
+                        help_text="Telegram chat ID (auto-populated on first message)",
+                        max_length=255,
+                        null=True,
+                    ),
+                ),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "Bot",
+                "verbose_name_plural": "Bots",
+                "ordering": ("-created_at",),
+            },
+        ),
+        migrations.CreateModel(
+            name="CronJob",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        db_index=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        unique=True,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("name", models.CharField(max_length=100)),
+                ("description", models.TextField()),
+                (
+                    "cron_expression",
+                    models.CharField(
+                        help_text="Scheduling in standard cron format",
+                        max_length=100,
+                        validators=[app.validators.validate_cron_expression],
+                    ),
+                ),
+                (
+                    "next_run_at",
+                    models.DateTimeField(
+                        help_text="Calculated timestamp for next execution"
+                    ),
+                ),
+                (
+                    "last_run_at",
+                    models.DateTimeField(
+                        blank=True, help_text="Timestamp of last execution", null=True
+                    ),
+                ),
+                ("is_active", models.BooleanField(default=True)),
+                (
+                    "bot",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="bot_cron_jobs",
+                        to="app.bot",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ("-created_at",),
+            },
+        ),
+        migrations.CreateModel(
+            name="Log",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        db_index=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        unique=True,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "is_success",
+                    models.BooleanField(
+                        default=True, help_text="Whether the bot execution succeeded"
+                    ),
+                ),
+                (
+                    "description",
+                    models.TextField(
+                        blank=True,
+                        help_text="Error message or execution details",
+                        null=True,
+                    ),
+                ),
+                (
+                    "bot",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="bot_logs",
+                        to="app.bot",
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "Log",
+                "verbose_name_plural": "Logs",
+                "ordering": ("-created_at",),
+            },
+        ),
+        migrations.CreateModel(
+            name="MCPServer",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        db_index=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        unique=True,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("name", models.CharField(max_length=100)),
+                (
+                    "transport",
+                    models.CharField(
+                        choices=[("R", "Remote"), ("L", "Local")], max_length=1
+                    ),
+                ),
+                (
+                    "command",
+                    models.CharField(
+                        blank=True,
+                        help_text="Command to run (python, npx, uv, etc.) - required for LOCAL transport",
+                        max_length=10,
+                        null=True,
+                    ),
+                ),
+                (
+                    "endpoint",
+                    models.URLField(
+                        blank=True,
+                        help_text="Remote MCP server HTTPS endpoint - required for REMOTE transport",
+                        null=True,
+                        validators=[
+                            django.core.validators.URLValidator(schemes=["https"])
+                        ],
+                    ),
+                ),
+                (
+                    "args",
+                    django.contrib.postgres.fields.ArrayField(
+                        base_field=models.CharField(max_length=500),
+                        blank=True,
+                        default=list,
+                        help_text="Command arguments as comma-seperated list (e.g., -y, @modelcontextprotocol/server-memory)",
+                        null=True,
+                        size=None,
+                    ),
+                ),
+                (
+                    "secrets",
+                    app.fields.EncryptedJSONField(
+                        blank=True,
+                        help_text="Environment variables (LOCAL) or HTTP headers (REMOTE) as JSON dict",
+                        null=True,
+                    ),
+                ),
+                (
+                    "is_active",
+                    models.BooleanField(
+                        default=True,
+                        help_text="Whether this MCP server is active and should be used",
+                    ),
+                ),
+                (
+                    "bot",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="mcp_servers",
+                        to="app.bot",
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "MCP Server",
+                "verbose_name_plural": "MCP Servers",
+                "ordering": ("-created_at",),
+            },
+        ),
+        migrations.CreateModel(
+            name="Message",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        db_index=True,
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        unique=True,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "role",
+                    models.CharField(
+                        choices=[("S", "System"), ("U", "User"), ("A", "Assistant")],
+                        max_length=1,
+                    ),
+                ),
+                (
+                    "intent",
+                    models.CharField(
+                        blank=True,
+                        choices=[
+                            ("J", "Journal Entry"),
+                            ("R", "Report Request"),
+                            ("Q", "Question/Query"),
+                            ("CJ", "Manage Cron Jobs"),
+                            ("O", "Other"),
+                        ],
+                        max_length=2,
+                        null=True,
+                    ),
+                ),
+                ("is_report", models.BooleanField(default=False)),
+                ("content", models.TextField()),
+                ("content_embedding", pgvector.django.vector.VectorField()),
+                (
+                    "bot",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="messages",
+                        to="app.bot",
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "Message",
+                "verbose_name_plural": "Messages",
+                "ordering": ("-created_at",),
+            },
+        ),
+    ]
