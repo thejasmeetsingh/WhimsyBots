@@ -43,10 +43,16 @@ def fetch_ollama_models_with_capabilities(
         models = client.list_models()
 
         for model in models:
-            capabilities = client.fetch_model_capabilities(model)
-            if "tools" in capabilities or "embedding" in capabilities:
-                result.append(
-                    {"model": model, "is_embedding": "embedding" in capabilities}
+            try:
+                capabilities = client.fetch_model_capabilities(model)
+                if "tools" in capabilities or "embedding" in capabilities:
+                    result.append(
+                        {"model": model, "is_embedding": "embedding" in capabilities}
+                    )
+            except Exception as _:
+                logger.info(
+                    "Failed to fetch details for model %s",
+                    model,
                 )
 
         return result
@@ -72,10 +78,7 @@ def get_models_from_cache() -> Optional[list[dict[str, str | bool]]]:
         cached_data = cache.get(MODEL_DATA_CACHE_KEY)
         return cached_data
     except Exception as _:
-        logger.error(
-            "Failed to retrieve models from cache for endpoint",
-            exc_info=True,
-        )
+        logger.error("Failed to retrieve models from cache", exc_info=True)
         return None
 
 
@@ -99,7 +102,7 @@ def save_models_to_cache(
         cache.set(MODEL_DATA_CACHE_KEY, models_data, MODEL_DATA_CACHE_TIMEOUT)
         return True
     except Exception as _:
-        logger.error("Failed to save models to cache for endpoint", exc_info=True)
+        logger.error("Failed to save models to cache", exc_info=True)
         return False
 
 
@@ -120,7 +123,7 @@ def get_filtered_models(
     return [
         (model["model"], model["model"])
         for model in models
-        if is_embedding and model["is_embedding"]
+        if model["is_embedding"] == is_embedding
     ]
 
 
@@ -131,8 +134,16 @@ class BotForm(forms.ModelForm):
     with the default model prioritized in the list.
     """
 
-    ollama_model = forms.ChoiceField(choices=EMPTY_MODEL_CHOICES, required=True)
-    embedding_model = forms.ChoiceField(choices=EMPTY_MODEL_CHOICES, required=True)
+    ollama_model = forms.ChoiceField(
+        choices=EMPTY_MODEL_CHOICES,
+        required=True,
+        help_text="Support is limited to models with tool calling capabilities",
+    )
+    embedding_model = forms.ChoiceField(
+        choices=EMPTY_MODEL_CHOICES,
+        required=True,
+        help_text="Model used for vector embeddings. Run: 'ollama pull nomic-embed-text' if no embedding model installed",
+    )
 
     class Meta:
         model = Bot
@@ -189,7 +200,7 @@ class BotForm(forms.ModelForm):
 
         # Try to get models from cache first
         models = get_models_from_cache()
-        if models:
+        if not models:
             models = fetch_ollama_models_with_capabilities(endpoint, api_key)
             if not models:
                 return
