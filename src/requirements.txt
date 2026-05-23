@@ -43,12 +43,14 @@ martor==1.7.16
 mcp==1.27.0
 mcp-server-time==2026.1.26
 multidict==6.7.1
+numpy==2.4.6
 ollama==0.6.1
 packaging==26.0
 pillow==12.2.0
 prometheus_client==0.25.0
 prompt_toolkit==3.0.52
 propcache==0.4.1
+pgvector==0.4.2
 psycopg2-binary==2.9.11
 pycparser==3.0
 pydantic==2.12.5

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from django.utils.log import DEFAULT_LOGGING
 from celery.schedules import crontab
+import redis
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -219,3 +220,12 @@ CELERY_BEAT_SCHEDULE = {
 
 # Webhook configuration
 WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "https://localhost:8000")
+
+
+# Cache configuration
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.getenv("CACHE_LOCATION"),
+    },
+}
