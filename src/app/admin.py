@@ -3,7 +3,7 @@ from django.utils.html import format_html
 
 from app.choices import MessageRole
 from app.models import CronJob, Ollama, Bot, MCPServer, Message, Log
-from app.forms import MCPServerForm, OllamaForm, BotForm
+from app.forms import MCPServerForm, BotForm
 from app.tasks import manage_conversation_summary, setup_bot_webhook
 from app.utils import get_admin_link
 
@@ -54,9 +54,6 @@ class OllamaAdmin(admin.ModelAdmin):
     Limited to a single instance to prevent configuration conflicts.
     """
 
-    list_display = ("default_model",)
-    form = OllamaForm
-
     def has_add_permission(self, request):
         """Allow adding only if no Ollama instance exists."""
 
@@ -94,6 +91,9 @@ class BotAdmin(admin.ModelAdmin):
                     "name",
                     "description",
                     "ollama_model",
+                    "embedding_model",
+                    "embedding_dimensions",
+                    "observed_patterns",
                     "is_active",
                     "created_at",
                     "updated_at",
@@ -283,7 +283,15 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
     list_display = ("bot", "role", "get_sender", "intent", "created_at")
     list_filter = ("role", "intent", "created_at")
     search_fields = ("bot__name", "content")
-    fields = ("bot", "role", "get_sender", "content", "intent", "created_at")
+    fields = (
+        "bot",
+        "role",
+        "get_sender",
+        "content",
+        "is_report",
+        "intent",
+        "created_at",
+    )
 
     @admin.display(description="Sender")
     def get_sender(self, obj=None):
