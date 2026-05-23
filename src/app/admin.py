@@ -90,10 +90,6 @@ class BotAdmin(admin.ModelAdmin):
                     "created_by",
                     "name",
                     "description",
-                    "ollama_model",
-                    "embedding_model",
-                    "embedding_dimensions",
-                    "observed_patterns",
                     "is_active",
                     "created_at",
                     "updated_at",
@@ -102,7 +98,18 @@ class BotAdmin(admin.ModelAdmin):
                 )
             },
         ),
-        ("System Prompt", {"fields": ("system_prompt",)}),
+        (
+            "Model Configuration",
+            {
+                "fields": (
+                    "ollama_model",
+                    "embedding_model",
+                    "embedding_dimensions",
+                    "observed_patterns",
+                    "system_prompt",
+                )
+            },
+        ),
         ("Communication", {"fields": ("telegram_bot_token", "telegram_chat_id")}),
     )
 
@@ -113,6 +120,7 @@ class BotAdmin(admin.ModelAdmin):
         "telegram_chat_id",
         "get_stats",
         "last_execution_status",
+        "observed_patterns",
     )
 
     def get_queryset(self, request):
