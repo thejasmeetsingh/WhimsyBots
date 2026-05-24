@@ -11,7 +11,7 @@ from services.tool_executor import MCPToolsBuilder
 from services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
-from app.managers import OllamaConfigManager, TelegramClientManager
+from managers import OllamaConfigManager, TelegramClientManager
 from app.utils import convert_messages_to_ollama_format, extract_html, generate_pdf
 from prompts import REPORT_GENERATION_PROMPT
 from strings import REPORT_READY

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.choices import MCPTransportType, MessageRole
-from app.managers import OllamaConfigManager, TelegramClientManager
+from managers import OllamaConfigManager, TelegramClientManager
 from services.tool_executor import MCPToolsBuilder
 from services.tool_calling_coordinator import run_tool_calling_loop
 from app.utils import convert_messages_to_ollama_format

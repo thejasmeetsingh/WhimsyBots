@@ -11,7 +11,7 @@ from typing import Dict, Any
 
 from app.choices import MessageRole
 from app.models import Bot, Message
-from app.managers import TelegramClientManager
+from managers import TelegramClientManager
 from app.utils import parse_telegram_update
 
 

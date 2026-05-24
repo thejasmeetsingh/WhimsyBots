@@ -15,7 +15,7 @@ from app.utils import calculate_next_run_at, get_token_hash
 from clients.telegram import TelegramRateLimitError
 from strings import NO_OLLAMA, OBJ_NOT_FOUND
 from whimsybots.celery import task as celery
-from app.managers import OllamaConfigManager, TelegramClientManager
+from managers import OllamaConfigManager, TelegramClientManager
 from services import (
     BotMessageProcessor,
     ReportGeneratorService,
