@@ -149,7 +149,7 @@ class ConversationSummaryService:
 
         try:
             response = self.ollama_client.chat(
-                model=self.ollama.default_model,
+                model=self.bot.ollama_model,
                 messages=[{"role": "user", "content": prompt}],
                 options={
                     "temperature": 0.3,  # lower temp for factual summarization
