@@ -122,3 +122,47 @@ Write the summary in third person as background context. Output only the summary
 ## New Messages
 {messages}
 """
+
+PATTERN_GENERATION_PROMPT = """
+You are analyzing a conversation history to extract behavioral patterns about the user.
+
+Your output will be stored as a compact behavioral profile used to personalize 
+future interactions. Be specific and observational — not evaluative.
+
+Focus on:
+- Communication style (formal/casual, verbose/concise, emoji usage, tone)
+- Recurring topics, themes, or goals they mention
+- Habits or routines that have emerged (time-based, frequency-based)
+- How they prefer to receive information (lists, prose, step-by-step, etc.)
+- Emotional patterns or concerns they return to
+- Any explicit preferences they've stated
+
+Rules:
+- Write in third person ("The user prefers...", "The user tends to...")
+- Be concise. Each observation should be 1-2 sentences max.
+- Only include patterns you've observed at least twice, or that were stated explicitly.
+- Do NOT include any personally identifying information.
+- Output must be under {max_chars} characters total.
+- Do not include preamble or explanation — output the profile directly.
+
+Conversation history to analyze:
+{conversation_history}
+"""
+
+TIME_MCP_SKILL = """
+## Time Awareness
+You have real-time time tools available. Always call get_current_time before 
+answering any time-sensitive question or scheduling task.
+The user's timezone is provided in context — use it for all time references.
+"""
+
+CRON_JOB_SKILL = """
+## Scheduling (Cron Jobs)
+You can create, list, update, and delete the user's scheduled tasks.
+- Before creating: confirm the schedule back to the user in plain language
+(e.g. "every weekday at 9 AM") before calling create_cron_job.
+- Use standard 5-field cron expressions (minute hour day month weekday).
+- Common patterns: daily 9 AM → "0 9 * * *", weekdays → "0 9 * * 1-5", 
+weekly Sunday → "0 10 * * 0".
+- Available tools: list_cron_jobs, create_cron_job, update_cron_job, delete_cron_job.
+"""
