@@ -6,8 +6,8 @@ from typing import Optional
 from django.utils import timezone
 from django.conf import settings
 from app.choices import MessageIntentType
-from app.services.conversation_summary import ConversationSummaryService
-from app.services.log_formatter import LogFormatter
+from services.conversation_summary import ConversationSummaryService
+from services.log_formatter import LogFormatter
 from clients import OllamaClient
 
 from app.models import Bot, CronJob, Log, Message
@@ -16,7 +16,7 @@ from clients.telegram import TelegramRateLimitError
 from strings import NO_OLLAMA, OBJ_NOT_FOUND
 from whimsybots.celery import task as celery
 from app.managers import OllamaConfigManager, TelegramClientManager
-from app.services import (
+from services import (
     BotMessageProcessor,
     ReportGeneratorService,
     TelegramUpdateHandler,

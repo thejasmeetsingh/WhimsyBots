@@ -13,8 +13,8 @@ from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.choices import MCPTransportType, MessageRole
 from app.managers import OllamaConfigManager, TelegramClientManager
-from app.services.tool_executor import MCPToolsBuilder
-from app.services.tool_calling_coordinator import run_tool_calling_loop
+from services.tool_executor import MCPToolsBuilder
+from services.tool_calling_coordinator import run_tool_calling_loop
 from app.utils import convert_messages_to_ollama_format
 from prompts import CRON_JOB_PROMPT, DEFAULT_SYSTEM_PROMPT
 

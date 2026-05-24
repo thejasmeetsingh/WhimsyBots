@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from clients import OllamaClient
 from app.models import Ollama
-from app.services.tool_executor import ToolExecutor
+from services.tool_executor import ToolExecutor
 
 
 logger = logging.getLogger(__name__)

@@ -7,8 +7,8 @@ from typing import Optional
 from django.utils import timezone
 
 from app.choices import MessageRole
-from app.services.tool_executor import MCPToolsBuilder
-from app.services.tool_calling_coordinator import run_tool_calling_loop
+from services.tool_executor import MCPToolsBuilder
+from services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.managers import OllamaConfigManager, TelegramClientManager
