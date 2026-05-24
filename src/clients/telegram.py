@@ -13,7 +13,7 @@ import redis
 import requests
 from django.conf import settings
 
-from app.rate_limiter import RateLimiter
+from services.rate_limiter import RateLimiter
 from app.utils import split_message
 
 
