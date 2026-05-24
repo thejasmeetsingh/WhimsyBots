@@ -22,18 +22,3 @@ class OllamaConfigManager:
         if cls._cached_ollama is None:
             cls._cached_ollama = Ollama.objects.first()
         return cls._cached_ollama
-
-    @classmethod
-    def get_model(cls, bot, ollama: Ollama) -> str:
-        """
-        Get the model to use, preferring bot's model over default.
-
-        Args:
-            bot: Bot instance
-            ollama: Ollama configuration
-
-        Returns:
-            Model name to use
-        """
-
-        return bot.ollama_model if bot.ollama_model else ollama.default_model
