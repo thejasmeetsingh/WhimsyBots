@@ -71,7 +71,7 @@ def get_admin_link(model: str, value: int, obj) -> str:
 
 def split_message(text: str, limit: int = 4096) -> List[str]:
     """
-    Split a long message into chunks respecting Telegram's character limit.
+    Split a long message into chunks respecting given limit.
 
     Attempts to split at the most natural boundary available, in this priority:
         1. End of a closing code fence (```) — never break inside a code block
@@ -82,12 +82,11 @@ def split_message(text: str, limit: int = 4096) -> List[str]:
         6. Hard cut (fallback — should rarely happen)
 
     If a split occurs mid-code-block, the next chunk is automatically prefixed
-    with a re-opened code fence (preserving the language tag if present) so
-    Telegram renders it correctly.
+    with a re-opened code fence (preserving the language tag if present).
 
     Args:
         text (str): Text to split
-        limit (int): Maximum characters per chunk (default: 4096 for Telegram)
+        limit (int): Maximum characters per chunk (default: 4096)
 
     Returns:
         list[str]: List of text chunks, each <= limit characters
