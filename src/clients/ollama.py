@@ -219,8 +219,6 @@ class OllamaClient:
         model: str,
         text: str,
         truncate: Optional[bool] = None,
-        options: Optional[dict] = None,
-        keep_alive: Optional[str] = None,
         dimensions: Optional[int] = None,
     ) -> list[float]:
         """
@@ -230,13 +228,6 @@ class OllamaClient:
             model (str): Model name to use for embeddings (e.g., 'nomic-embed-text', 'mxbai-embed-large')
             text (str): Text to generate embeddings for
             truncate (bool): truncate inputs that exceed the context window
-            options (dict | None): Model-specific options
-                Common options:
-                - "temperature" (float): 0.0-1.0, controls randomness
-                - "num_ctx" (int): Context window size in tokens
-                - "num_predict" (int): Max tokens to generate
-            keep_alive (str | None): Model keep-alive duration
-                Default: None (uses Ollama default)
             dimensions (int | None): Number of dimensions to generate embeddings for
 
         Returns:
