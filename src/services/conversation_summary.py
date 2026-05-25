@@ -5,50 +5,58 @@ from typing import Optional
 
 from app.models import Bot, Message, Ollama
 from app.choices import MessageRole
+from services import TokenBudgetService
 from clients.ollama import OllamaClient
 from prompts import SUMMARY_PROMPT
 
 logger = logging.getLogger(__name__)
-
-# Fraction of num_ctx to use as our character budget.
-# Remaining 20% is headroom for tool definitions, system prompt, and LLM response.
-CTX_BUDGET_RATIO = 0.8
-
-# Rough characters-per-token estimate (industry standard approximation).
-CHARS_PER_TOKEN = 4
 
 
 class ConversationSummaryService:
     """
     Handles context window management for a single bot.
 
-    Calculates whether the bot's message history exceeds the configured
-    num_ctx budget, and if so summarizes the overflow messages via Ollama
-    and persists the result as a role='S' Message record.
+    Determines whether the bot's message history exceeds its token budget
+    (sourced from TokenBudgetService), and if so summarizes the overflow
+    messages via Ollama and persists the result as a role='S' Message record.
+
+    The history token budget already accounts for tool definitions, output
+    reservation, skills, embeddings, and all other fixed costs — so the
+    split here reflects exactly how many messages ContextAssembler will
+    actually be able to include.
     """
 
-    def __init__(self, bot: Bot, ollama: Ollama, ollama_client: OllamaClient):
+    def __init__(
+        self,
+        bot: Bot,
+        ollama: Ollama,
+        ollama_client: OllamaClient,
+        tool_definitions: list[dict],
+    ):
         self.bot = bot
         self.ollama = ollama
         self.ollama_client = ollama_client
-        self.budget = int(ollama.num_ctx * CHARS_PER_TOKEN * CTX_BUDGET_RATIO)
+
+        # Derive the history token budget the same way ContextAssembler does,
+        # so the split point here is always consistent with what gets sent to
+        # the LLM during message processing.
+        budget = TokenBudgetService.compute(ollama, tool_definitions)
+        self.history_token_budget = budget.history_tokens
 
     def process(self) -> Optional[tuple[Message, bool]]:
         """
-        Evaluate the bot's message history against the context budget.
+        Evaluate the bot's message history against the history token budget.
 
         If history exceeds the budget, summarizes the overflow into a single
         Message(role='S') record. If history fits within the budget,
-        any existing summary is deleted (it's no longer needed).
+        returns None (no action needed).
 
         Returns:
-            tuple consisting:
-                Message instance with role='S'
-                A boolean identifies the operation
+            (Message, created: bool) where Message has role='S', or None.
         """
 
         # Fetch only messages in chronological order
-        messages = Message.objects.filter(bot_id=self.bot.id).order_by("created_at")
+        messages = Message.objects.filter(bot_id=self.bot.id)
         conversations = list(
             messages.filter(
                 role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
@@ -60,8 +68,9 @@ class ConversationSummaryService:
             return None
 
         in_window, overflowed = self._split_by_budget(conversations)
+
         if not overflowed:
-            logger.info(f"No overflowed messages found for bot: {self.bot.name}")
+            logger.info("No overflowed messages for bot: %s", self.bot.name)
             return None
 
         # Generate summary for overflowed messages
@@ -81,7 +90,10 @@ class ConversationSummaryService:
             )
 
         logger.info(
-            f"covered {len(overflowed)} messages, {len(in_window)} in window for bot: {self.bot.name}"
+            "Summarized %d overflowed messages, %d remain in window for bot: %s",
+            len(overflowed),
+            len(in_window),
+            self.bot.name,
         )
 
         return summary_msg, created
@@ -90,32 +102,22 @@ class ConversationSummaryService:
         self, messages: list[Message]
     ) -> tuple[list[Message], list[Message]]:
         """
-        Walk messages newest-to-oldest, accumulating character count.
-        Messages that fit within the budget form the 'in_window' list.
-        Everything older is 'overflowed' and should be summarized.
+        Delegates the budget-aware split to TokenBudgetService so the logic
+        is never duplicated. Messages that fit within history_token_budget
+        form the 'in_window' list; everything older is 'overflowed'.
 
         Args:
-            messages: Chronologically ordered list of Message instances
+            messages: Chronologically ordered list of Message instances.
 
         Returns:
-            (in_window, overflowed) — both in chronological order
+            (in_window, overflowed) — both in chronological order.
         """
 
-        accumulated = 0
-        in_window = []
+        in_window = TokenBudgetService.fit_messages_to_token_budget(
+            messages=messages,
+            token_budget=self.history_token_budget,
+        )
 
-        for msg in reversed(messages):
-            msg_len = len(msg.content)
-            if accumulated + msg_len <= self.budget:
-                accumulated += msg_len
-                in_window.append(msg)
-            else:
-                break
-
-        # in_window was built newest-first, reverse back to chronological
-        in_window.reverse()
-
-        # Everything not in the window is overflow
         in_window_ids = {str(m.id) for m in in_window}
         overflowed = [m for m in messages if str(m.id) not in in_window_ids]
 
@@ -125,26 +127,26 @@ class ConversationSummaryService:
         self, messages: list[Message], summary_msg: Optional[Message]
     ) -> Optional[str]:
         """
-        Call Ollama to produce a summary of the given messages.
+        Calls Ollama to produce a summary of the overflowed messages.
 
         Args:
-            messages: Overflow messages to summarize (chronological order)
-            summary_msg: Message object with role='S'
+            messages:    Overflow messages to summarize (chronological order).
+            summary_msg: Existing summary Message (role='S'), if any.
 
         Returns:
             Summary text string, or None if the call fails.
         """
 
-        # Format messages for the prompt
         formatted = "\n".join(
-            f"{('User' if m.role == MessageRole.USER.value[0] else 'Assistant')}: {m.content}"
+            f"{'User' if m.role == MessageRole.USER.value[0] else 'Assistant'}: {m.content}"
             for m in messages
         )
 
         previous_summary = summary_msg.content if summary_msg else "NA"
 
         prompt = SUMMARY_PROMPT.format(
-            previous_summary=previous_summary, messages=formatted
+            previous_summary=previous_summary,
+            messages=formatted,
         )
 
         try:
@@ -152,7 +154,7 @@ class ConversationSummaryService:
                 model=self.bot.ollama_model,
                 messages=[{"role": "user", "content": prompt}],
                 options={
-                    "temperature": 0.3,  # lower temp for factual summarization
+                    "temperature": 0.3,
                     "num_ctx": self.ollama.num_ctx,
                     "num_predict": self.ollama.num_predict,
                 },
@@ -161,7 +163,8 @@ class ConversationSummaryService:
 
         except Exception:
             logger.error(
-                f"Failed to generate summary for bot: {self.bot.name}",
+                "Failed to generate summary for bot: %s",
+                self.bot.name,
                 exc_info=True,
             )
             return None
