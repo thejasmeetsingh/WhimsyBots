@@ -11,7 +11,7 @@ from services.tool_executor import MCPToolsBuilder
 from services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
-from managers import OllamaConfigManager, TelegramClientManager
+from managers import TelegramClientManager
 from app.utils import convert_messages_to_ollama_format, extract_html, generate_pdf
 from prompts import REPORT_GENERATION_PROMPT
 from strings import REPORT_READY
@@ -36,7 +36,6 @@ class ReportGeneratorService:
         self.bot = bot
         self.ollama = ollama
         self.ollama_client = ollama_client
-        self.model = OllamaConfigManager.get_model(bot, ollama)
         self.telegram_client = TelegramClientManager.create_client(bot)
 
     def generate_and_send(self, message: str) -> tuple[str, Optional[int]]:
@@ -80,7 +79,7 @@ class ReportGeneratorService:
             # Run tool calling loop to generate report
             report_response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
-                model=self.model,
+                model=self.bot.ollama_model,
                 history=history,
                 tools_config=tools_config,
                 ollama=self.ollama,

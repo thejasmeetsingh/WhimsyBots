@@ -14,10 +14,10 @@ Ollama models, so we use a conservative 3.5 chars/token estimate.
 This intentionally under-budgets slightly, giving a safe headroom.
 """
 
-from __future__ import annotations
 import json
 import logging
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel
 
 from app.models import Ollama
 from app.utils import split_message
@@ -58,8 +58,7 @@ ALLOCATION_RATIOS: dict[str, float] = {
 assert abs(sum(ALLOCATION_RATIOS.values()) - 1.0) < 1e-9, "Ratios must sum to 1.0"
 
 
-@dataclass
-class TokenBudget:
+class TokenBudget(BaseModel):
     # Raw inputs
     num_ctx: int
     output_reservation: int
@@ -81,7 +80,7 @@ class TokenBudget:
     patterns_chars: int
 
     # Diagnostics
-    allocation_breakdown: dict[str, int] = field(default_factory=dict)
+    allocation_breakdown: dict[str, int]
 
     def log_summary(self) -> None:
         logger.info(

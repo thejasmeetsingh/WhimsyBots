@@ -16,7 +16,6 @@ Note: Embedding generation delegates to OllamaClient.embed() — no direct
 HTTP calls here.
 """
 
-from __future__ import annotations
 import logging
 
 from pgvector.django import CosineDistance
@@ -30,10 +29,19 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    @classmethod
-    def save_message_embedding(
-        cls, message: "Message", ollama_config: "Ollama"
-    ) -> None:
+    def __init__(self, bot: Bot, ollama: Ollama):
+        """
+        Initialize the embedding service.
+
+        Args:
+            bot: Bot instance
+            ollama: Ollama configuration
+        """
+
+        self.bot = bot
+        self.ollama = ollama
+
+    def save_message_embedding(self, message: Message) -> None:
         """
         Generates a vector embedding for message.content and saves it to
         message.content_embedding. Skips silently if the embedding model
@@ -47,7 +55,7 @@ class EmbeddingService:
             logger.debug("Skipping embedding for empty message %s", message.id)
             return
 
-        if not ollama_config.embedding_model:
+        if not self.bot.embedding_model:
             logger.warning(
                 "No embedding model configured on Ollama config — skipping embedding "
                 "for message %s. Set embedding_model in the admin panel.",
@@ -55,7 +63,7 @@ class EmbeddingService:
             )
             return
 
-        vector = cls._generate(message.content, ollama_config)
+        vector = self._generate(message.content)
         if vector is None:
             return
 
@@ -68,14 +76,11 @@ class EmbeddingService:
             len(vector),
         )
 
-    @classmethod
     def get_relevant_memories(
-        cls,
+        self,
         query_text: str,
-        bot: "Bot",
         current_message_id: str,
         top_k: int,
-        ollama_config: "Ollama",
     ) -> list[tuple["Message", float]]:
         """
         Finds the top-k past USER messages most semantically similar to
@@ -91,49 +96,49 @@ class EmbeddingService:
           - No embedded messages exist for this bot yet
         """
 
-        if not bot.embedding_model:
+        if not self.bot.embedding_model:
             logger.debug("No embedding model configured — skipping memory retrieval")
             return []
 
-        query_vector = cls._generate(query_text, bot, ollama_config)
+        query_vector = self._generate(query_text)
         if query_vector is None:
             return []
 
-        return cls._query_similar(
+        return self._query_similar(
             query_vector=query_vector,
-            bot_id=bot.id,
             current_message_id=current_message_id,
             top_k=top_k,
         )
 
-    @classmethod
     def _generate(
-        cls, text: str, bot: "Bot", ollama_config: "Ollama"
+        self,
+        text: str,
     ) -> list[float] | None:
         """
         Delegates to OllamaClient.embed(). Returns the vector or None on failure.
         """
 
-        try:
-            client = OllamaClient(ollama_config.endpoint, api_key=ollama_config.api_key)
+        client = OllamaClient(
+            endpoint=self.ollama.endpoint, api_key=self.ollama.api_key
+        )
 
+        try:
             return client.generate_embeddings(
-                model=bot.embedding_model,
+                model=self.bot.embedding_model,
                 text=text,
                 truncate=True,
-                dimensions=bot.embedding_dimensions,
+                dimensions=self.bot.embedding_dimensions,
             )
         except Exception as exc:
             logger.exception("Embedding generation failed: %s", exc)
             return None
 
-    @staticmethod
     def _query_similar(
+        self,
         query_vector: list[float],
-        bot_id: str,
         current_message_id: str,
         top_k: int,
-    ) -> list[tuple["Message", float]]:
+    ) -> list[tuple[Message, float]]:
         """
         Queries the Message table using pgvector's cosine distance operator (<=>).
 
@@ -148,7 +153,7 @@ class EmbeddingService:
         try:
             results = (
                 Message.objects.filter(
-                    bot_id=bot_id,
+                    bot_id=self.bot.id,
                     role=MessageRole.USER.value[0],
                     content_embedding__isnull=False,
                 )

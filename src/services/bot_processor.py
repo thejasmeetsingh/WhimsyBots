@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.choices import MCPTransportType, MessageRole
-from managers import OllamaConfigManager, TelegramClientManager
+from managers import TelegramClientManager
 from services.tool_executor import MCPToolsBuilder
 from services.tool_calling_coordinator import run_tool_calling_loop
 from app.utils import convert_messages_to_ollama_format
@@ -43,7 +43,6 @@ class BotMessageProcessor:
         self.bot = bot
         self.ollama = ollama
         self.ollama_client = ollama_client
-        self.model = OllamaConfigManager.get_model(bot, ollama)
         self.telegram_client = TelegramClientManager.create_client(bot)
 
     def _parse_llm_response(self, raw: str) -> StructuredOutput:
@@ -184,7 +183,7 @@ class BotMessageProcessor:
             # Run tool calling loop
             response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
-                model=self.model,
+                model=self.bot.ollama_model,
                 history=history,
                 tools_config=tools_config,
                 ollama=self.ollama,
@@ -237,7 +236,7 @@ class BotMessageProcessor:
             # Run tool calling loop
             response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
-                model=self.model,
+                model=self.bot.ollama_model,
                 history=[
                     {
                         "role": "user",

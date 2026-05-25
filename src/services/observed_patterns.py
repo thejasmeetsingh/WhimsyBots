@@ -15,7 +15,6 @@ The output is always capped at MAX_PATTERN_CHARS (4096) so it fits in the
 minimum context window regardless of how verbose the LLM gets.
 """
 
-from __future__ import annotations
 import logging
 
 from clients.ollama import OllamaClient
@@ -35,8 +34,19 @@ PATTERN_ANALYSIS_MESSAGE_LIMIT: int = 100
 
 
 class ObservedPatternsService:
-    @classmethod
-    def should_regenerate(cls, bot_id: str, n: int) -> bool:
+    def __init__(self, bot: Bot, ollama: Ollama):
+        """
+        Initialize the observed patterns service.
+
+        Args:
+            bot: Bot instance
+            ollama: Ollama configuration
+        """
+
+        self.bot = bot
+        self.ollama = ollama
+
+    def should_regenerate(self, n: int) -> bool:
         """
         Returns True if the current user message count is a multiple of N,
         meaning it's time to trigger a pattern regeneration.
@@ -44,19 +54,17 @@ class ObservedPatternsService:
         Called from process_inbound_message after saving the user message.
 
         Args:
-            bot_id: The bot's UUID string
             n: Regen interval from settings (PATTERN_REGEN_EVERY_N_MESSAGES)
         """
 
         count = Message.objects.filter(
-            bot_id=bot_id,
+            bot_id=self.bot.id,
             role=MessageRole.USER.value[0],
         ).count()
 
         return count > 0 and count % n == 0
 
-    @classmethod
-    def regenerate(cls, bot: "Bot", ollama_config: "Ollama") -> None:
+    def regenerate(self) -> None:
         """
         Main entry point called by the Celery task.
 
@@ -68,45 +76,46 @@ class ObservedPatternsService:
         """
 
         messages = list(
-            Message.objects.filter(bot_id=bot.id).order_by("-created_at")[
+            Message.objects.filter(bot_id=self.bot.id).order_by("-created_at")[
                 :PATTERN_ANALYSIS_MESSAGE_LIMIT
             ]
         )
         messages.reverse()  # chronological order for readability
 
         if not messages:
-            logger.info("No messages found for bot %s, skipping pattern regen", bot.id)
+            logger.info(
+                "No messages found for bot %s, skipping pattern regen", self.bot.id
+            )
             return
 
-        conversation_history = cls._format_history(messages)
+        conversation_history = self._format_history(messages)
 
         prompt = PATTERN_GENERATION_PROMPT.format(
             max_chars=MAX_PATTERN_CHARS,
             conversation_history=conversation_history,
         )
 
-        raw_patterns = cls._call_llm(prompt, bot, ollama_config)
+        raw_patterns = self._call_llm(prompt)
 
         if not raw_patterns:
             logger.warning(
-                "Pattern generation returned empty result for bot %s", bot.id
+                "Pattern generation returned empty result for bot %s", self.bot.id
             )
             return
 
         # Hard cap — LLM instructions alone can't be fully trusted
         truncated = raw_patterns[:MAX_PATTERN_CHARS]
 
-        bot.observed_patterns = truncated
-        bot.save(update_fields=["observed_patterns", "updated_at"])
+        self.bot.observed_patterns = truncated
+        self.bot.save(update_fields=["observed_patterns", "updated_at"])
 
         logger.info(
             "Observed patterns updated for bot %s (%d chars)",
-            bot.id,
+            self.bot.id,
             len(truncated),
         )
 
-    @staticmethod
-    def _format_history(messages: list) -> str:
+    def _format_history(self, messages: list[Message]) -> str:
         """
         Formats messages as a readable transcript for the LLM to analyze.
         Example:
@@ -128,19 +137,19 @@ class ObservedPatternsService:
             lines.append(f"[{ts}] {label}: {msg.content}")
         return "\n".join(lines)
 
-    @staticmethod
-    def _call_llm(prompt: str, bot: "Bot", ollama_config: "Ollama") -> str | None:
+    def _call_llm(self, prompt: str) -> str | None:
         """
         Simple single-turn LLM call (no tools, no structured output).
         Patterns are freeform prose — we just need a clean text response.
         """
 
-        client = OllamaClient(ollama_config.endpoint, api_key=ollama_config.api_key)
-        model = bot.ollama_model
+        client = OllamaClient(
+            endpoint=self.ollama.endpoint, api_key=self.ollama.api_key
+        )
 
         try:
             response = client.chat(
-                model=model,
+                model=self.bot.ollama_model,
                 messages=[{"role": "user", "content": prompt}],
                 # No tools, no structured format — plain text output
             )
@@ -149,6 +158,6 @@ class ObservedPatternsService:
             return response.get("message", "")
         except Exception as exc:
             logger.exception(
-                "Pattern generation LLM call failed for bot %s: %s", bot.id, exc
+                "Pattern generation LLM call failed for bot %s: %s", self.bot.id, exc
             )
             return None

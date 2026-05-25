@@ -15,13 +15,13 @@ Conversation history is passed separately as the messages array (not in
 the system prompt), with oldest messages dropped first when budget is tight.
 """
 
-from __future__ import annotations
 import logging
-from dataclasses import dataclass
 from typing import Optional
 
-from django.utils import timezone
+from pydantic import BaseModel
+from django.conf import settings
 
+from prompts import DEFAULT_SYSTEM_PROMPT
 from app.models import Bot, Message, Ollama
 from app.utils import convert_messages_to_ollama_format
 from services import TokenBudgetService, TokenBudget, SkillsRegistry, EmbeddingService
@@ -33,8 +33,7 @@ logger = logging.getLogger(__name__)
 SECTION_SEP = "\n\n---\n\n"
 
 
-@dataclass
-class AssembledContext:
+class AssembledContext(BaseModel):
     system_prompt: str
     history: list[
         dict
@@ -43,12 +42,22 @@ class AssembledContext:
 
 
 class ContextAssembler:
-    @classmethod
+    def __init__(self, bot: Bot, ollama: Ollama, current_message: Message):
+        """
+        Initialize the processor.
+
+        Args:
+            bot: Bot instance
+            ollama: Ollama configuration
+            current_message: Current Message
+        """
+
+        self.bot = bot
+        self.ollama = ollama
+        self.current_message = current_message
+
     def assemble(
-        cls,
-        bot: "Bot",
-        current_message: "Message",
-        ollama_config: "Ollama",
+        self,
         tool_definitions: list[dict],
         active_mcp_server_names: list[str],
     ) -> AssembledContext:
@@ -60,13 +69,17 @@ class ContextAssembler:
           4. Fit conversation history to token budget
         """
 
-        # ── 1. Budget ────────────────────────────────────────────────────────
-        budget = TokenBudgetService.compute(ollama_config, tool_definitions)
+        # 1. Budget
+        budget = TokenBudgetService.compute(self.ollama, tool_definitions)
 
-        # ── 2. Fetch & truncate each source ──────────────────────────────────
-
+        # 2. Fetch & truncate each source
         # System prompt — truncate from bottom (preserve the opening intent)
-        raw_system_prompt = bot.system_prompt or ""
+        raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
+            system_prompt=self.bot.system_prompt or "You are a helpful assistant",
+            bot_id=str(self.bot.id),
+            timezone=settings.TIME_ZONE,
+        )
+
         fitted_system_prompt = TokenBudgetService.truncate_text(
             raw_system_prompt,
             budget.system_prompt_chars,
@@ -82,12 +95,12 @@ class ContextAssembler:
         skills_block = SkillsRegistry.get_skills_block(active_mcp_server_names)
 
         # Observed patterns — generated async, stored on bot, always protected
-        patterns_block = cls._fit_patterns(bot, budget)
+        patterns_block = self._fit_patterns(budget)
 
         # Relevant memories via embeddings
-        memories_block = cls._fit_memories(current_message, bot, ollama_config, budget)
+        memories_block = self._fit_memories(budget)
 
-        # ── 3. Assemble system prompt ─────────────────────────────────────────
+        # 3. Assemble system prompt
         sections = []
 
         if fitted_system_prompt:
@@ -102,13 +115,10 @@ class ContextAssembler:
         if memories_block:
             sections.append(memories_block)
 
-        # Always-present bot metadata injection (existing behaviour)
-        sections.append(cls._bot_metadata_block(bot))
-
         system_prompt = SECTION_SEP.join(sections)
 
-        # ── 4. Fit conversation history ───────────────────────────────────────
-        history = cls._fit_history(bot, current_message, budget)
+        # 4. Fit conversation history
+        history = self._fit_history(budget)
 
         return AssembledContext(
             system_prompt=system_prompt,
@@ -116,29 +126,25 @@ class ContextAssembler:
             budget=budget,
         )
 
-    @staticmethod
-    def _fit_patterns(bot: "Bot", budget: TokenBudget) -> str:
+    def _fit_patterns(self, budget: TokenBudget) -> str:
         """
         Patterns are always protected — they're already capped at 4096 chars
         during generation (see ObservedPatternsService). We still apply
         budget.patterns_chars as a secondary safety net.
         """
 
-        if not bot.observed_patterns:
+        if not self.bot.observed_patterns:
             return ""
 
         fitted = TokenBudgetService.truncate_text(
-            bot.observed_patterns,
+            self.bot.observed_patterns,
             budget.patterns_chars,
         )
 
         return f"## Observed User Patterns\n{fitted}"
 
-    @staticmethod
     def _fit_memories(
-        current_message: "Message",
-        bot: "Bot",
-        ollama_config: "Ollama",
+        self,
         budget: TokenBudget,
         top_k: Optional[int] = 5,
     ) -> str:
@@ -151,12 +157,11 @@ class ContextAssembler:
             return ""
 
         # Returns list of (Message, similarity_score) sorted by score desc
-        raw_memories = EmbeddingService.get_relevant_memories(
-            query_text=current_message.content,
-            bot_id=str(bot.id),
-            current_message_id=str(current_message.id),
+        embedding_svc = EmbeddingService(self.bot, self.ollama)
+        raw_memories = embedding_svc.get_relevant_memories(
+            query_text=self.current_message.content,
+            current_message_id=str(self.current_message.id),
             top_k=top_k,
-            ollama_config=ollama_config,
         )
 
         if not raw_memories:
@@ -174,16 +179,14 @@ class ContextAssembler:
         lines.append(
             "The following are past messages from this conversation that may be relevant:\n"
         )
-        for msg, _score in fitted:
+        for msg, _ in fitted:
             ts = msg.created_at.strftime("%Y-%m-%d")
             lines.append(f"[{ts}] {msg.content}")
 
         return "\n".join(lines)
 
-    @staticmethod
     def _fit_history(
-        bot: "Bot",
-        current_message: "Message",
+        self,
         budget: TokenBudget,
     ) -> list[dict]:
         """
@@ -193,8 +196,8 @@ class ContextAssembler:
 
         # Exclude the current message (it's sent as the live user turn, not history)
         recent = list(
-            Message.objects.filter(bot_id=bot.id)
-            .exclude(id=current_message.id)
+            Message.objects.filter(bot_id=self.bot.id)
+            .exclude(id=self.current_message.id)
             .order_by("-created_at")[
                 # newest first for budget walk
                 :200
@@ -207,13 +210,3 @@ class ContextAssembler:
         )
 
         return convert_messages_to_ollama_format(messages=fitted)
-
-    @staticmethod
-    def _bot_metadata_block(bot: "Bot") -> str:
-        """
-        Always-present metadata injected at the end of the system prompt.
-        Matches existing behaviour in BotMessageProcessor.
-        """
-
-        tz_name = str(timezone.get_current_timezone())
-        return f"Bot ID: {bot.id}\nCurrent timezone: {tz_name}"
