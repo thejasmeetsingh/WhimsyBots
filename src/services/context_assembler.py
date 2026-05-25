@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 # Separator used between sections in the system prompt.
 SECTION_SEP = "\n\n---\n\n"
 
+# Recent Messages Cap For History
+RECENT_MESSAGES_CAP: int = 200
+
 
 class AssembledContext(BaseModel):
     system_prompt: str
@@ -196,12 +199,9 @@ class ContextAssembler:
 
         # Exclude the current message (it's sent as the live user turn, not history)
         recent = list(
-            Message.objects.filter(bot_id=self.bot.id)
-            .exclude(id=self.current_message.id)
-            .order_by("-created_at")[
-                # newest first for budget walk
-                :200
-            ]  # hard cap: never scan more than 200 messages
+            Message.objects.filter(bot_id=self.bot.id).exclude(
+                id=self.current_message.id
+            )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
         )
 
         fitted = TokenBudgetService.fit_messages_to_token_budget(
