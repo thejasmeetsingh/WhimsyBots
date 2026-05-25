@@ -1,10 +1,13 @@
 DEFAULT_SYSTEM_PROMPT = """
+# General Information\n\n
 {system_prompt}
 
-- `bot_id` for cron job management: {bot_id}
-- User's default timezone: {timezone}
+## Summary of earlier conversations:\n
+"{summary}"
 
 ---
+
+# IMPORTANT
 
 When the user sends a message, respond in valid JSON with two fields:
 
@@ -151,9 +154,9 @@ Conversation history to analyze:
 
 TIME_MCP_SKILL = """
 ## Time Awareness
-You have real-time time tools available. Always call get_current_time before 
+You have real-time 'time' tools available. Always call 'get_current_time' before 
 answering any time-sensitive question or scheduling task.
-The user's timezone is provided in context — use it for all time references.
+The user's timezone is {timezone} — use it for all time references.
 """
 
 CRON_JOB_SKILL = """
@@ -165,4 +168,6 @@ You can create, list, update, and delete the user's scheduled tasks.
 - Common patterns: daily 9 AM → "0 9 * * *", weekdays → "0 9 * * 1-5", 
 weekly Sunday → "0 10 * * 0".
 - Available tools: list_cron_jobs, create_cron_job, update_cron_job, delete_cron_job.
+
+**NOTE**: Use {bot_id} as `bot_id` for cron job management
 """

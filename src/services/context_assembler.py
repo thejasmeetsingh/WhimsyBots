@@ -21,6 +21,7 @@ from typing import Optional
 from pydantic import BaseModel
 from django.conf import settings
 
+from app.choices import MessageRole
 from prompts import DEFAULT_SYSTEM_PROMPT
 from app.models import Bot, Message, Ollama
 from app.utils import convert_messages_to_ollama_format
@@ -72,6 +73,15 @@ class ContextAssembler:
           4. Fit conversation history to token budget
         """
 
+        # Fetch messages
+        messages = Message.objects.filter(bot_id=self.bot.id)
+
+        conversations = messages.filter(
+            role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
+        )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
+
+        summary_msg = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
+
         # 1. Budget
         budget = TokenBudgetService.compute(self.ollama, tool_definitions)
 
@@ -79,8 +89,7 @@ class ContextAssembler:
         # System prompt — truncate from bottom (preserve the opening intent)
         raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
             system_prompt=self.bot.system_prompt or "You are a helpful assistant",
-            bot_id=str(self.bot.id),
-            timezone=settings.TIME_ZONE,
+            summary=summary_msg or "Not Available, Please Ignore.",
         )
 
         fitted_system_prompt = TokenBudgetService.truncate_text(
@@ -95,7 +104,11 @@ class ContextAssembler:
             )
 
         # Skills — static, always fits, no truncation needed
-        skills_block = SkillsRegistry.get_skills_block(active_mcp_server_names)
+        skills_block = SkillsRegistry.get_skills_block(
+            active_mcp_server_names,
+            bot_id=str(self.bot.id),
+            timezone=settings.TIME_ZONE,
+        )
 
         # Observed patterns — generated async, stored on bot, always protected
         patterns_block = self._fit_patterns(budget)
@@ -121,7 +134,7 @@ class ContextAssembler:
         system_prompt = SECTION_SEP.join(sections)
 
         # 4. Fit conversation history
-        history = self._fit_history(budget)
+        history = self._fit_history(budget, messages=conversations)
 
         return AssembledContext(
             system_prompt=system_prompt,
@@ -188,24 +201,14 @@ class ContextAssembler:
 
         return "\n".join(lines)
 
-    def _fit_history(
-        self,
-        budget: TokenBudget,
-    ) -> list[dict]:
+    def _fit_history(self, budget: TokenBudget, messages: list[Message]) -> list[dict]:
         """
-        Fetch recent messages, walk newest→oldest, keep until history_tokens
-        budget is exhausted. Returns Ollama-formatted dicts in chronological order.
+        Walk newest→oldest for the given messages, keep until history_tokens budget is exhausted.
+        Returns Ollama-formatted dicts in chronological order.
         """
-
-        # Exclude the current message (it's sent as the live user turn, not history)
-        recent = list(
-            Message.objects.filter(bot_id=self.bot.id).exclude(
-                id=self.current_message.id
-            )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
-        )
 
         fitted = TokenBudgetService.fit_messages_to_token_budget(
-            messages=recent,
+            messages=messages,
             token_budget=budget.history_tokens,
         )
 

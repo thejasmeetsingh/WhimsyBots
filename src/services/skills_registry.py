@@ -27,7 +27,7 @@ SKILLS: dict[str, str] = {
 
 class SkillsRegistry:
     @staticmethod
-    def get_skills_block(server_names: list[str]) -> str:
+    def get_skills_block(server_names: list[str], bot_id: str, timezone: str) -> str:
         """
         Returns a formatted skills block for the given server names.
         Only includes entries that exist in SKILLS — unknown names are
@@ -39,14 +39,26 @@ class SkillsRegistry:
             server_names: List of active MCPServer.name values for this bot.
                           Typically ["time", "cron_job"] for default servers,
                           plus any custom ones the user has added.
+            bot_id: Bot ID will be used as a context to the default CronJob MCP server.
+            timezone: App's default timezone will be used as a context in the default Time MCP server
         """
 
-        matched = [SKILLS[name] for name in server_names if name in SKILLS]
+        matched = []
+
+        for name in server_names:
+            skill = SKILLS[name]
+
+            if name == "time":
+                skill.format(timezone=timezone)
+            elif name == "cron_job":
+                skill.format(bot_id=bot_id)
+
+            matched.append(skill)
 
         if not matched:
             return ""
 
-        return "# Bot Skills\n\n" + "\n\n".join(matched)
+        return "# Skills\n\n" + "\n\n".join(matched)
 
     @staticmethod
     def known_skills() -> list[str]:
