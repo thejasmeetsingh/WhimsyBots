@@ -234,7 +234,7 @@ class Message(BaseModel):
     )
     is_report = models.BooleanField(default=False)
     content = models.TextField()
-    content_embedding = VectorField()
+    content_embedding = VectorField(null=True, blank=True)
 
     class Meta:
         ordering = ("-created_at",)
