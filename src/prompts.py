@@ -63,6 +63,9 @@ The user has made the following report request:
 {user_request}
 \"\"\"
 
+## Summary of earlier conversations:\n
+"{summary}"
+
 Focus entirely on fulfilling this request — tailor the report's title, sections, and content around what the user asked for.
 Use the conversation history provided for any additional context, data, or details needed to complete the report.
 Omit any section that has no relevant data for this particular report.

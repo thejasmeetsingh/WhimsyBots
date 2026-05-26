@@ -310,7 +310,7 @@ def generate_pdf(html_content: str) -> bytes:
 
 
 def convert_messages_to_ollama_format(
-    messages, system_prompt: Optional[str] = None, summary: Optional[str] = None
+    messages, system_prompt: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """
     Convert Message model instances to Ollama API message format.
@@ -318,8 +318,6 @@ def convert_messages_to_ollama_format(
     Args:
         messages: Queryset or list of Message instances (role U/A only)
         system_prompt (str | None): Runtime system prompt — always first
-        summary (str | None): Persisted conversation summary — slots in
-            immediately after system_prompt if provided
 
     Returns:
         list[dict]: Ollama-formatted message list
@@ -343,14 +341,6 @@ def convert_messages_to_ollama_format(
 
     if system_prompt:
         ollama_messages.append({"role": "system", "content": system_prompt})
-
-    if summary:
-        ollama_messages.append(
-            {
-                "role": "system",
-                "content": f"Summary of earlier conversation:\n{summary}",
-            }
-        )
 
     for message in messages:
         # Skip system messages — summary is handled above explicitly
