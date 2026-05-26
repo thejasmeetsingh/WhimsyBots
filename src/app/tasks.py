@@ -5,7 +5,7 @@ from typing import Optional
 
 from django.utils import timezone
 from django.conf import settings
-from app.choices import MessageIntentType
+from app.choices import MessageIntentType, MessageRole
 from services.conversation_summary import ConversationSummaryService
 from services.log_formatter import LogFormatter
 from clients import OllamaClient
@@ -20,6 +20,8 @@ from services import (
     BotMessageProcessor,
     ReportGeneratorService,
     TelegramUpdateHandler,
+    EmbeddingService,
+    ObservedPatternsService,
 )
 
 logger = logging.getLogger(__name__)
@@ -273,12 +275,19 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
             logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot))
             return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot)
 
+        # Get message
+        try:
+            message = Message.objects.get(id=msg_id)
+        except Message.DoesNotExist:
+            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
+            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
+
         # Initialize clients and processor
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
         processor = BotMessageProcessor(bot, ollama, ollama_client)
 
         # Process message
-        result, ollama_ms = processor.process_message()
+        result, ollama_ms = processor.process_message(message=message)
 
         if result:
             # Kick-off intent classification process
@@ -301,6 +310,15 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
                 kwargs={"bot_id": bot_id},
             )
             logger.info("Conversation summary task queued")
+
+            # Conditionally regenerate observed patterns
+            pattern_svc = ObservedPatternsService(bot=bot, ollama=ollama)
+            if pattern_svc.should_regenerate():
+                regenerate_observed_patterns.apply_async(
+                    queue="default",
+                    kwargs={"bot_id": bot_id},
+                )
+                logger.info("Pattern observation task queued")
 
         # Success Log
         intent_label = MessageIntentType.get_readable(result.intent) if result else None
@@ -438,7 +456,7 @@ def generate_report(self, bot_id: str, msg_id: str):
         generator = ReportGeneratorService(bot, ollama, ollama_client)
 
         # Generate and send report
-        result, ollama_ms = generator.generate_and_send(message.content)
+        result, ollama_ms = generator.generate_and_send(message=message)
 
         # Success Log
         desc = (
@@ -552,3 +570,79 @@ def manage_conversation_summary(self, bot_id: Optional[str] = None):
     except Exception as e:
         logger.error("Failed to manage conversation summaries", exc_info=True)
         raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
+
+
+@celery.task(bind=True, max_retries=3)
+def generate_embedding(self, message_id: str) -> None:
+    """
+    Generates and saves the content_embedding vector for a user message.
+
+    - Always runs after the response is sent (non-blocking)
+    - Skips silently if embedding already exists or role != USER
+    - Retries with exponential backoff on transient failures
+    """
+
+    try:
+        ollama = OllamaConfigManager.get_ollama_config()
+        if not ollama:
+            logger.error(NO_OLLAMA)
+            return NO_OLLAMA
+
+        # Get message
+        try:
+            message = Message.objects.get(id=message_id)
+        except Message.DoesNotExist:
+            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=message_id))
+            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=message_id)
+
+        if message.role != MessageRole.USER.value[0]:
+            logger.debug("Skipping embedding for non-user message %s", message_id)
+            return
+
+        if message.content_embedding is not None:
+            logger.debug(
+                "Embedding already exists for message %s, skipping", message_id
+            )
+            return
+
+        embedding_svc = EmbeddingService(bot=message.bot, ollama=ollama)
+        embedding_svc.save_message_embedding(message=message)
+
+    except Exception as exc:
+        logger.exception(
+            "generate_embedding failed for message %s: %s", message_id, exc
+        )
+        # Exponential backoff: 60s, 120s, 240s
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
+
+
+@celery.task(bind=True, max_retries=3)
+def regenerate_observed_patterns(self, bot_id: str) -> None:
+    """
+    Analyzes recent conversation history and updates Bot.observed_patterns
+    with a compact behavioral profile (always capped at 4096 chars).
+
+    Triggered every PATTERN_REGEN_EVERY_N_MESSAGES user messages.
+    """
+
+    try:
+        ollama = OllamaConfigManager.get_ollama_config()
+        if not ollama:
+            logger.error(NO_OLLAMA)
+            return NO_OLLAMA
+
+        # Get bot
+        try:
+            bot = Bot.objects.get(id=bot_id)
+        except Bot.DoesNotExist:
+            logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
+            return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id)
+
+        pattern_svc = ObservedPatternsService(bot=bot, ollama=ollama)
+        pattern_svc.regenerate()
+
+    except Exception as exc:
+        logger.exception(
+            "regenerate_observed_patterns failed for bot %s: %s", bot_id, exc
+        )
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
