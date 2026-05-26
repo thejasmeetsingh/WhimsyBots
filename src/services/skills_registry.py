@@ -46,14 +46,14 @@ class SkillsRegistry:
         matched = []
 
         for name in server_names:
-            skill = SKILLS[name]
+            skill = SKILLS.get(name)
 
-            if name == "time":
-                skill.format(timezone=timezone)
-            elif name == "cron_job":
-                skill.format(bot_id=bot_id)
-
-            matched.append(skill)
+            if skill:
+                if name == "time":
+                    skill.format(timezone=timezone)
+                elif name == "cron_job":
+                    skill.format(bot_id=bot_id)
+                matched.append(skill)
 
         if not matched:
             return ""

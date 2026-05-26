@@ -7,13 +7,13 @@ from typing import Optional
 from django.utils import timezone
 
 from app.choices import MessageRole
+from services import ContextAssembler
 from services.tool_executor import MCPToolsBuilder
 from services.tool_calling_coordinator import run_tool_calling_loop
 from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from managers import TelegramClientManager
-from app.utils import convert_messages_to_ollama_format, extract_html, generate_pdf
-from prompts import REPORT_GENERATION_PROMPT
+from app.utils import extract_html, generate_pdf
 from strings import REPORT_READY
 
 
@@ -38,12 +38,12 @@ class ReportGeneratorService:
         self.ollama_client = ollama_client
         self.telegram_client = TelegramClientManager.create_client(bot)
 
-    def generate_and_send(self, message: str) -> tuple[str, Optional[int]]:
+    def generate_and_send(self, message: Message) -> tuple[str, Optional[int]]:
         """
         Generate a report from bot conversation history and send to user.
 
         Args:
-            message (str): User's message for report generation.
+            message (Message): User's message.
 
         Returns:
             Status message and total duration taken by ollama
@@ -59,18 +59,13 @@ class ReportGeneratorService:
                 MCPToolsBuilder.build_tools_from_servers(list(mcp_servers))
             )
 
-            # Fetch messages
-            messages = Message.objects.filter(bot_id=self.bot.id).order_by("created_at")
-            conversations = messages.filter(
-                role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
+            context_assembler_svc = ContextAssembler(
+                bot=self.bot, ollama=self.ollama, current_message=message
             )
-            summary_msg = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
-
-            # Prepare message history
-            history = convert_messages_to_ollama_format(
-                messages=conversations,
-                system_prompt=REPORT_GENERATION_PROMPT.format(user_request=message),
-                summary=summary_msg,
+            context = context_assembler_svc.assemble(
+                tool_definitions=[tool.tool for tool in tools_config],
+                active_mcp_server_names=[],
+                is_report=True,
             )
 
             # Send typing indicator (responsive UX)
@@ -80,7 +75,7 @@ class ReportGeneratorService:
             report_response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.bot.ollama_model,
-                history=history,
+                history=context.history,
                 tools_config=tools_config,
                 ollama=self.ollama,
             )

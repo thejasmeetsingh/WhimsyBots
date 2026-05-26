@@ -32,6 +32,9 @@ MAX_PATTERN_CHARS: int = 4096
 # More messages = richer profile, but higher LLM cost per regen.
 PATTERN_ANALYSIS_MESSAGE_LIMIT: int = 100
 
+# Generates pattern every N messages
+PATTERN_REGEN_EVERY_N_MESSAGES: int = 20
+
 
 class ObservedPatternsService:
     def __init__(self, bot: Bot, ollama: Ollama):
@@ -46,7 +49,7 @@ class ObservedPatternsService:
         self.bot = bot
         self.ollama = ollama
 
-    def should_regenerate(self, n: int) -> bool:
+    def should_regenerate(self, n: int = PATTERN_REGEN_EVERY_N_MESSAGES) -> bool:
         """
         Returns True if the current user message count is a multiple of N,
         meaning it's time to trigger a pattern regeneration.
@@ -76,18 +79,15 @@ class ObservedPatternsService:
         """
 
         messages = list(
-            Message.objects.filter(bot_id=self.bot.id).order_by("-created_at")[
-                :PATTERN_ANALYSIS_MESSAGE_LIMIT
-            ]
+            Message.objects.filter(bot_id=self.bot.id)[:PATTERN_ANALYSIS_MESSAGE_LIMIT]
         )
-        messages.reverse()  # chronological order for readability
-
         if not messages:
             logger.info(
                 "No messages found for bot %s, skipping pattern regen", self.bot.id
             )
             return
 
+        messages.reverse()  # chronological order for readability
         conversation_history = self._format_history(messages)
 
         prompt = PATTERN_GENERATION_PROMPT.format(

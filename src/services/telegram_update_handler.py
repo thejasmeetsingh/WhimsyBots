@@ -91,7 +91,7 @@ class TelegramUpdateHandler:
         """
 
         # Import here to avoid circular dependencies (tasks.py imports this service)
-        from app.tasks import process_inbound_message
+        from app.tasks import process_inbound_message, generate_embedding
 
         try:
             # Parse Telegram update
@@ -125,6 +125,12 @@ class TelegramUpdateHandler:
             process_inbound_message.apply_async(
                 queue="default",
                 kwargs={"bot_id": str(bot.id), "msg_id": str(message.id)},
+            )
+
+            # Generate embedding for user's message
+            generate_embedding.apply_async(
+                queue="default",
+                kwargs={"message_id": str(message.id)},
             )
 
             logger.info(f"Queued message {message.id} for processing")
