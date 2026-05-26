@@ -8,6 +8,8 @@ from services.token_budget import TokenBudget, TokenBudgetService
 from services.observed_patterns import ObservedPatternsService
 from services.skills_registry import SkillsRegistry
 from services.embedding import EmbeddingService
+from services.rate_limiter import RateLimiter
+from services.context_assembler import ContextAssembler
 
 __all__ = (
     "ToolExecutor",
@@ -21,4 +23,6 @@ __all__ = (
     "ObservedPatternsService",
     "SkillsRegistry",
     "EmbeddingService",
+    "RateLimiter",
+    "ContextAssembler",
 )

@@ -13,10 +13,10 @@ from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
 from app.choices import MCPTransportType, MessageRole
 from managers import TelegramClientManager
+from services import ContextAssembler
 from services.tool_executor import MCPToolsBuilder
 from services.tool_calling_coordinator import run_tool_calling_loop
-from app.utils import convert_messages_to_ollama_format
-from prompts import CRON_JOB_PROMPT, DEFAULT_SYSTEM_PROMPT
+from prompts import CRON_JOB_PROMPT
 
 
 logger = logging.getLogger(__name__)
@@ -136,9 +136,14 @@ class BotMessageProcessor:
 
         return {"cron_job": cron_job_mcp, "time": time_mcp}
 
-    def process_message(self) -> tuple[StructuredOutput, Optional[int]]:
+    def process_message(
+        self, message: Message
+    ) -> tuple[StructuredOutput, Optional[int]]:
         """
         Process message with tool calling loop.
+
+        Args:
+            message (Message): Latest user message object
 
         Returns:
             StructuredOutput: Intent and LLM Response
@@ -159,22 +164,12 @@ class BotMessageProcessor:
                 MCPToolsBuilder.build_tools_from_servers(mcp_servers)
             )
 
-            system_prompt = DEFAULT_SYSTEM_PROMPT.format(
-                system_prompt=self.bot.system_prompt or "You are a helpful assistant",
-                bot_id=str(self.bot.id),
-                timezone=settings.TIME_ZONE,
+            context_assembler_svc = ContextAssembler(
+                bot=self.bot, ollama=self.ollama, current_message=message
             )
-
-            # Fetch messages
-            messages = Message.objects.filter(bot_id=self.bot.id).order_by("created_at")
-            conversations = messages.filter(
-                role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
-            )
-            summary_msg = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
-
-            # Prepare message history
-            history = convert_messages_to_ollama_format(
-                messages=conversations, system_prompt=system_prompt, summary=summary_msg
+            context = context_assembler_svc.assemble(
+                tool_definitions=[tool.tool for tool in tools_config],
+                active_mcp_server_names=list(default_servers.keys()),
             )
 
             # Send typing indicator (responsive UX)
@@ -184,7 +179,7 @@ class BotMessageProcessor:
             response, ollama_ms = run_tool_calling_loop(
                 ollama_client=self.ollama_client,
                 model=self.bot.ollama_model,
-                history=history,
+                history=context.history,
                 tools_config=tools_config,
                 ollama=self.ollama,
                 add_keep_alive=True,

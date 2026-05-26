@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from django.conf import settings
 
 from app.choices import MessageRole
-from prompts import DEFAULT_SYSTEM_PROMPT
+from prompts import DEFAULT_SYSTEM_PROMPT, REPORT_GENERATION_PROMPT
 from app.models import Bot, Message, Ollama
 from app.utils import convert_messages_to_ollama_format
 from services import TokenBudgetService, TokenBudget, SkillsRegistry, EmbeddingService
@@ -38,7 +38,6 @@ RECENT_MESSAGES_CAP: int = 200
 
 
 class AssembledContext(BaseModel):
-    system_prompt: str
     history: list[
         dict
     ]  # Ollama-formatted message dicts [{"role": ..., "content": ...}]
@@ -64,6 +63,7 @@ class ContextAssembler:
         self,
         tool_definitions: list[dict],
         active_mcp_server_names: list[str],
+        is_report: bool = False,
     ) -> AssembledContext:
         """
         Full pipeline:
@@ -80,16 +80,23 @@ class ContextAssembler:
             role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
         )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
 
-        summary_msg = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
+        summary = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
+        summary_msg = summary.content if summary else "Not Available, Please Ignore."
 
         # 1. Budget
         budget = TokenBudgetService.compute(self.ollama, tool_definitions)
 
         # 2. Fetch & truncate each source
         # System prompt — truncate from bottom (preserve the opening intent)
-        raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
-            system_prompt=self.bot.system_prompt or "You are a helpful assistant",
-            summary=summary_msg or "Not Available, Please Ignore.",
+        raw_system_prompt = (
+            REPORT_GENERATION_PROMPT.format(
+                user_request=self.current_message.content, summary=summary_msg
+            )
+            if is_report
+            else DEFAULT_SYSTEM_PROMPT.format(
+                system_prompt=self.bot.system_prompt or "You are a helpful assistant",
+                summary=summary_msg,
+            )
         )
 
         fitted_system_prompt = TokenBudgetService.truncate_text(
@@ -134,10 +141,11 @@ class ContextAssembler:
         system_prompt = SECTION_SEP.join(sections)
 
         # 4. Fit conversation history
-        history = self._fit_history(budget, messages=conversations)
+        history = self._fit_history(
+            budget, messages=conversations, system_prompt=system_prompt
+        )
 
         return AssembledContext(
-            system_prompt=system_prompt,
             history=history,
             budget=budget,
         )
@@ -201,7 +209,12 @@ class ContextAssembler:
 
         return "\n".join(lines)
 
-    def _fit_history(self, budget: TokenBudget, messages: list[Message]) -> list[dict]:
+    def _fit_history(
+        self,
+        budget: TokenBudget,
+        messages: list[Message],
+        system_prompt: Optional[str] = None,
+    ) -> list[dict]:
         """
         Walk newest→oldest for the given messages, keep until history_tokens budget is exhausted.
         Returns Ollama-formatted dicts in chronological order.
@@ -212,4 +225,6 @@ class ContextAssembler:
             token_budget=budget.history_tokens,
         )
 
-        return convert_messages_to_ollama_format(messages=fitted)
+        return convert_messages_to_ollama_format(
+            messages=fitted, system_prompt=system_prompt
+        )
