@@ -8,11 +8,10 @@ updates and queue them for async processing via Celery tasks.
 import json
 import logging
 
-from django.views import View
 from django.http.response import HttpResponse, HttpResponseBadRequest
+from django.views import View
 
 from app.tasks import telegram_msg_handler
-
 
 logger = logging.getLogger(__name__)
 
