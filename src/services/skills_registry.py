@@ -14,8 +14,7 @@ Adding a new default MCP server:
   3. That's it — ContextAssembler picks it up automatically via get_skills_block()
 """
 
-from prompts import TIME_MCP_SKILL, CRON_JOB_SKILL
-
+from prompts import CRON_JOB_SKILL, TIME_MCP_SKILL
 
 # Skill definitions
 # Each key matches the MCPServer.name of a default server.

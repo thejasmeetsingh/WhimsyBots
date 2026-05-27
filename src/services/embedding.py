@@ -20,10 +20,9 @@ import logging
 
 from pgvector.django import CosineDistance
 
-from app.models import Bot, Message, Ollama
 from app.choices import MessageRole
+from app.models import Bot, Message, Ollama
 from clients.ollama import OllamaClient
-
 
 logger = logging.getLogger(__name__)
 

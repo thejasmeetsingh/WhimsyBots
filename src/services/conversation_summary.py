@@ -3,11 +3,11 @@
 import logging
 from typing import Optional
 
-from app.models import Bot, Message, Ollama
 from app.choices import MessageRole
-from services import TokenBudgetService
+from app.models import Bot, Message, Ollama
 from clients.ollama import OllamaClient
 from prompts import SUMMARY_PROMPT
+from services.token_budget import TokenBudgetService
 
 logger = logging.getLogger(__name__)
 

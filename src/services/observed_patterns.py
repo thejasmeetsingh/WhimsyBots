@@ -17,11 +17,10 @@ minimum context window regardless of how verbose the LLM gets.
 
 import logging
 
-from clients.ollama import OllamaClient
-from app.models import Bot, Ollama, Message
 from app.choices import MessageRole
+from app.models import Bot, Message, Ollama
+from clients.ollama import OllamaClient
 from prompts import PATTERN_GENERATION_PROMPT
-
 
 logger = logging.getLogger(__name__)
 

@@ -3,10 +3,9 @@
 import logging
 from typing import Any, Optional
 
-from clients import OllamaClient
 from app.models import Ollama
+from clients import OllamaClient
 from services.tool_executor import ToolExecutor
-
 
 logger = logging.getLogger(__name__)
 

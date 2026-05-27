@@ -7,13 +7,12 @@ of concerns between task definitions and business logic.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
 
 from app.choices import MessageRole
 from app.models import Bot, Message
-from managers import TelegramClientManager
 from app.utils import parse_telegram_update
-
+from managers import TelegramClientManager
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +90,7 @@ class TelegramUpdateHandler:
         """
 
         # Import here to avoid circular dependencies (tasks.py imports this service)
-        from app.tasks import process_inbound_message, generate_embedding
+        from app.tasks import generate_embedding, process_inbound_message
 
         try:
             # Parse Telegram update

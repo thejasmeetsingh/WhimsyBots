@@ -18,15 +18,16 @@ the system prompt), with oldest messages dropped first when budget is tight.
 import logging
 from typing import Optional
 
-from pydantic import BaseModel
 from django.conf import settings
+from pydantic import BaseModel
 
 from app.choices import MessageRole
-from prompts import DEFAULT_SYSTEM_PROMPT, REPORT_GENERATION_PROMPT
 from app.models import Bot, Message, Ollama
 from app.utils import convert_messages_to_ollama_format
-from services import TokenBudgetService, TokenBudget, SkillsRegistry, EmbeddingService
-
+from prompts import DEFAULT_SYSTEM_PROMPT, REPORT_GENERATION_PROMPT
+from services.embedding import EmbeddingService
+from services.skills_registry import SkillsRegistry
+from services.token_budget import TokenBudget, TokenBudgetService
 
 logger = logging.getLogger(__name__)
 

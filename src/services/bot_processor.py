@@ -6,18 +6,16 @@ import logging
 import re
 from typing import Literal, Optional
 
-from django.conf import settings
 from pydantic import BaseModel, ValidationError
 
-from clients import OllamaClient
+from app.choices import MessageRole
 from app.models import Bot, MCPServer, Message, Ollama
-from app.choices import MCPTransportType, MessageRole
+from clients import OllamaClient
 from managers import TelegramClientManager
-from services import ContextAssembler
-from services.tool_executor import MCPToolsBuilder
-from services.tool_calling_coordinator import run_tool_calling_loop
 from prompts import CRON_JOB_PROMPT
-
+from services.context_assembler import ContextAssembler
+from services.tool_calling_coordinator import run_tool_calling_loop
+from services.tool_executor import MCPToolsBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -106,36 +104,6 @@ class BotMessageProcessor:
         result = StructuredOutput(intent="O", response=raw.strip())
         return result
 
-    def get_default_mcp_servers(self) -> dict[str, MCPServer]:
-        """
-        Create MCPServer (temp) objects for default MCP servers
-
-        Returns:
-            dict[str, MCPServer]: MCPServer objects
-        """
-
-        cron_job_mcp = MCPServer(
-            name="cron_job",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "cron_job"],
-            secrets={
-                "DB_NAME": settings.DB_NAME,
-                "DB_USER": settings.DB_USER,
-                "DB_PASSWORD": settings.DB_PASSWORD,
-                "DB_HOST": settings.DB_HOST,
-            },
-        )
-
-        time_mcp = MCPServer(
-            name="time",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "mcp_server_time"],
-        )
-
-        return {"cron_job": cron_job_mcp, "time": time_mcp}
-
     def process_message(
         self, message: Message
     ) -> tuple[StructuredOutput, Optional[int]]:
@@ -157,7 +125,7 @@ class BotMessageProcessor:
             )
 
             # Add default mcp server's to the 'mcp_servers' list
-            default_servers = self.get_default_mcp_servers()
+            default_servers = MCPServer.get_default_mcp_servers()
             mcp_servers.extend(list(default_servers.values()))
 
             tools_config = asyncio.run(

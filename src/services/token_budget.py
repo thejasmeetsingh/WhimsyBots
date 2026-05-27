@@ -22,7 +22,6 @@ from pydantic import BaseModel
 from app.models import Ollama
 from app.utils import split_message
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -84,8 +83,8 @@ class TokenBudget(BaseModel):
 
     def log_summary(self) -> None:
         logger.info(
-            "TokenBudget computed",
-            extra={
+            {
+                "msg": "TokenBudget computed",
                 "num_ctx": self.num_ctx,
                 "usable_tokens": self.usable_tokens,
                 "system_prompt_chars": self.system_prompt_chars,
@@ -93,7 +92,7 @@ class TokenBudget(BaseModel):
                 "embedding_chars": self.embedding_chars,
                 "history_tokens": self.history_tokens,
                 "tool_response_chars": self.tool_response_chars,
-            },
+            }
         )
 
 

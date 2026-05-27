@@ -1,21 +1,20 @@
 """Report generator service"""
 
-import logging
 import asyncio
+import logging
 from typing import Optional
 
 from django.utils import timezone
 
 from app.choices import MessageRole
-from services import ContextAssembler
-from services.tool_executor import MCPToolsBuilder
-from services.tool_calling_coordinator import run_tool_calling_loop
-from clients import OllamaClient
 from app.models import Bot, MCPServer, Message, Ollama
-from managers import TelegramClientManager
 from app.utils import extract_html, generate_pdf
+from clients import OllamaClient
+from managers import TelegramClientManager
+from services.context_assembler import ContextAssembler
+from services.tool_calling_coordinator import run_tool_calling_loop
+from services.tool_executor import MCPToolsBuilder
 from strings import REPORT_READY
-
 
 logger = logging.getLogger(__name__)
 
