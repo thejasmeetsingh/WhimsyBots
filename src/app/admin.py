@@ -2,11 +2,10 @@ from django.contrib import admin
 from django.utils.html import format_html
 
 from app.choices import MessageRole
-from app.models import CronJob, Ollama, Bot, MCPServer, Message, Log
-from app.forms import MCPServerForm, BotForm
+from app.forms import BotForm, MCPServerForm
+from app.models import Bot, CronJob, Log, MCPServer, Message, Ollama
 from app.tasks import manage_conversation_summary, setup_bot_webhook
 from app.utils import get_admin_link
-
 
 admin.AdminSite.site_header = "WhimsyBots"
 admin.AdminSite.site_title = "WhimsyBots"

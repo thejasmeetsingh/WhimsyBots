@@ -1,28 +1,28 @@
 """Celery task definitions for async job processing"""
 
+import asyncio
 import logging
 from typing import Optional
 
-from django.utils import timezone
 from django.conf import settings
-from app.choices import MessageIntentType, MessageRole
-from services.conversation_summary import ConversationSummaryService
-from services.log_formatter import LogFormatter
-from clients import OllamaClient
+from django.utils import timezone
 
-from app.models import Bot, CronJob, Log, Message
+from app.choices import MessageIntentType, MessageRole
+from app.models import Bot, CronJob, Log, MCPServer, Message
 from app.utils import calculate_next_run_at, get_token_hash
+from clients import OllamaClient
 from clients.telegram import TelegramRateLimitError
+from managers import OllamaConfigManager, TelegramClientManager
+from services.bot_processor import BotMessageProcessor
+from services.conversation_summary import ConversationSummaryService
+from services.embedding import EmbeddingService
+from services.log_formatter import LogFormatter
+from services.observed_patterns import ObservedPatternsService
+from services.report_generator import ReportGeneratorService
+from services.telegram_update_handler import TelegramUpdateHandler
+from services.tool_executor import MCPToolsBuilder
 from strings import NO_OLLAMA, OBJ_NOT_FOUND
 from whimsybots.celery import task as celery
-from managers import OllamaConfigManager, TelegramClientManager
-from services import (
-    BotMessageProcessor,
-    ReportGeneratorService,
-    TelegramUpdateHandler,
-    EmbeddingService,
-    ObservedPatternsService,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -545,8 +545,24 @@ def manage_conversation_summary(self, bot_id: Optional[str] = None):
         summaries_to_update = []
         summaries_to_create = []
 
+        # Build tools from servers
+        mcp_servers = list(MCPServer.objects.filter(bot_id=bot_id, is_active=True))
+
+        # Add default mcp server's to the 'mcp_servers' list
+        default_servers = MCPServer.get_default_mcp_servers()
+        mcp_servers.extend(list(default_servers.values()))
+
+        tools_config = asyncio.run(
+            MCPToolsBuilder.build_tools_from_servers(mcp_servers)
+        )
+
         for bot in bots:
-            service = ConversationSummaryService(bot, ollama, ollama_client)
+            service = ConversationSummaryService(
+                bot,
+                ollama,
+                ollama_client,
+                tool_definitions=[tool.tool for tool in tools_config],
+            )
             result = service.process()
 
             if result:

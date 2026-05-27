@@ -12,13 +12,15 @@ This module defines the core data models:
 
 import uuid
 
-from django.db import models
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.postgres.fields import ArrayField
-from django.core.validators import URLValidator, MinValueValidator
+from django.core.validators import MinValueValidator, URLValidator
+from django.db import models
 from martor.models import MartorField
 from pgvector.django import VectorField
 
+from app.choices import MCPTransportType, MessageIntentType, MessageRole
 from app.fields import EncryptedCharField, EncryptedJSONField
 from app.utils import get_token_hash
 from app.validators import (
@@ -26,7 +28,6 @@ from app.validators import (
     validate_keep_alive,
     validate_transport_fields,
 )
-from app.choices import MCPTransportType, MessageIntentType, MessageRole
 
 
 class BaseModel(models.Model):
@@ -214,6 +215,37 @@ class MCPServer(BaseModel):
 
         validate_transport_fields(self.transport, self.command, self.endpoint)
         return super().clean()
+
+    @staticmethod
+    def get_default_mcp_servers() -> dict[str, "MCPServer"]:
+        """
+        Create MCPServer (temp) objects for default MCP servers
+
+        Returns:
+            dict[str, MCPServer]: MCPServer objects
+        """
+
+        cron_job_mcp = MCPServer(
+            name="cron_job",
+            transport=MCPTransportType.LOCAL.value[0],
+            command="python",
+            args=["-m", "cron_job"],
+            secrets={
+                "DB_NAME": settings.DB_NAME,
+                "DB_USER": settings.DB_USER,
+                "DB_PASSWORD": settings.DB_PASSWORD,
+                "DB_HOST": settings.DB_HOST,
+            },
+        )
+
+        time_mcp = MCPServer(
+            name="time",
+            transport=MCPTransportType.LOCAL.value[0],
+            command="python",
+            args=["-m", "mcp_server_time"],
+        )
+
+        return {"cron_job": cron_job_mcp, "time": time_mcp}
 
     def __str__(self):
         return self.name

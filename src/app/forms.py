@@ -4,11 +4,10 @@ from typing import Optional
 from django import forms
 from django.core.cache import cache
 
-from app.models import MCPServer, Ollama, Bot
+from app.models import Bot, MCPServer, Ollama
 from app.utils import get_token_hash
 from clients import OllamaClient
 from strings import UNIQUE_TELEGRAM_TOKEN_ERROR
-
 
 logger = logging.getLogger(__name__)
 
