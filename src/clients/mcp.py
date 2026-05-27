@@ -5,12 +5,12 @@ Provides async/await interface for connecting to MCP servers (both local and rem
 Handles tool discovery and execution with automatic cleanup.
 """
 
-from typing import Any, Dict, Optional, List
 from contextlib import AsyncExitStack
+from typing import Any, Dict, List, Optional
 
 import httpx
-from mcp.client.stdio import stdio_client
 from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from app.choices import MCPTransportType

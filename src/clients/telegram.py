@@ -13,9 +13,8 @@ import redis
 import requests
 from django.conf import settings
 
-from services import RateLimiter
 from app.utils import split_message
-
+from services.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 

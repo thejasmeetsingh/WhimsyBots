@@ -246,21 +246,20 @@ class OllamaClient:
             >>> print(response.embeddings[:5])   # First 5 embedding values
         """
 
-        if keep_alive:
-            keep_alive = keep_alive.strip()
-            keep_alive = int(keep_alive) if keep_alive in {"-1", "0"} else keep_alive
-
         response = self._client.embed(
             model=model,
             input=text,
             truncate=truncate,
-            options=options,
-            keep_alive=keep_alive,
             dimensions=dimensions,
         )
 
         # Ollama returns embeddings as a list of floats
-        return response.embeddings
+        embeddings = response.embeddings
+
+        if embeddings and isinstance(embeddings[0], list):
+            embeddings = embeddings[0]
+
+        return embeddings
 
     def fetch_model_capabilities(self, model: str) -> list[str]:
         """
