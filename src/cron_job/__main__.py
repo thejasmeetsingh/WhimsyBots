@@ -5,7 +5,6 @@ import logging
 
 from cron_job.server import mcp
 
-
 logger = logging.getLogger(__name__)
 
 
