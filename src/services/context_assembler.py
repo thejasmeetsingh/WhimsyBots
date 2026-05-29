@@ -122,7 +122,11 @@ class ContextAssembler:
         patterns_block = self._fit_patterns(budget)
 
         # Relevant memories via embeddings
-        memories_block = self._fit_memories(budget)
+        memories_block = (
+            self._fit_memories(budget)
+            if self.current_message.content_embedding
+            else None
+        )
 
         # 3. Assemble system prompt
         sections = []

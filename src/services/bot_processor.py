@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ValidationError
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class StructuredOutput(BaseModel):
-    intent: Literal["J", "R", "Q", "CJ", "O"]
+    is_report: bool
     response: str
 
 
@@ -81,19 +81,19 @@ class BotMessageProcessor:
         if json_match:
             try:
                 result = StructuredOutput.model_validate_json(json_match.group(0))
-                return result.intent, result.response
+                return result
 
             except ValidationError:
                 # JSON found but fields don't match schema
                 # attempt manual extraction with fallback values
                 try:
                     data = json.loads(json_match.group(0))
-                    intent = data.get("intent", "O").strip().upper()
+                    is_report = data.get("is_report", "false").strip()
                     response = data.get("response", raw.strip())
 
                     # ensure intent is valid before constructing
                     result = StructuredOutput(
-                        intent=intent if intent in {"J", "R", "Q", "CJ", "O"} else "O",
+                        is_report=is_report and is_report == "true",
                         response=response if response else raw.strip(),
                     )
                     return result
@@ -101,7 +101,7 @@ class BotMessageProcessor:
                 except (json.JSONDecodeError, ValidationError):
                     pass
 
-        result = StructuredOutput(intent="O", response=raw.strip())
+        result = StructuredOutput(is_report=False, response=raw.strip())
         return result
 
     def process_message(
@@ -114,7 +114,7 @@ class BotMessageProcessor:
             message (Message): Latest user message object
 
         Returns:
-            StructuredOutput: Intent and LLM Response
+            StructuredOutput: Report Intent and LLM Response
             ollama_ms: total duration taken by ollama
         """
 
@@ -167,7 +167,7 @@ class BotMessageProcessor:
 
     def process_cron_job(
         self, name: str, description: str
-    ) -> tuple[str, Optional[int]]:
+    ) -> tuple[StructuredOutput, Optional[int]]:
         """
         Process cron job with tool calling loop.
 
@@ -176,7 +176,8 @@ class BotMessageProcessor:
             description (str): cron job description
 
         Returns:
-            Final response from LLM and total duration taken by ollama
+            StructuredOutput: Report Intent and LLM Response
+            ollama_ms: total duration taken by ollama
         """
 
         try:
@@ -212,7 +213,9 @@ class BotMessageProcessor:
                 ollama=self.ollama,
             )
 
-            return response, ollama_ms
+            # Validate the response strucutre
+            result = self._parse_llm_response(response)
+            return result, ollama_ms
 
         except ValidationError as _:
             logger.error("Invalid response returned from the bot", exc_info=True)
@@ -221,7 +224,7 @@ class BotMessageProcessor:
             logger.error("Failed to process cron job activity", exc_info=True)
             raise
 
-    def send_response(self, response: str) -> None:
+    def send_response(self, response: StructuredOutput) -> None:
         """
         Send response to user and save to database.
 
@@ -230,10 +233,13 @@ class BotMessageProcessor:
         """
 
         try:
-            self.telegram_client.send_message(response)
+            self.telegram_client.send_message(text=response.response)
 
             Message.objects.create(
-                bot=self.bot, role=MessageRole.ASSISTANT.value[0], content=response
+                bot=self.bot,
+                role=MessageRole.ASSISTANT.value[0],
+                content=response.response,
+                is_report=response.is_report,
             )
         except Exception as _:
             logger.error("Failed to send response", exc_info=True)

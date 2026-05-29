@@ -11,14 +11,14 @@ class LogFormatter:
     Usage:
         desc = LogFormatter("process_inbound_message")
             .add("bot", bot.name)
-            .add("intent", "Journal Entry")
+            .add("is_report", True)
             .add("ollama", "1243ms")
             .build()
 
     Output:
         [process_inbound_message]
         bot=MyJournalBot
-        intent=Journal Entry
+        is_report=True
         ollama=1243ms
     """
 
