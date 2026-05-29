@@ -7,7 +7,7 @@ from typing import Optional
 from django.conf import settings
 from django.utils import timezone
 
-from app.choices import MessageIntentType, MessageRole
+from app.choices import MessageRole
 from app.models import Bot, CronJob, Log, MCPServer, Message
 from app.utils import calculate_next_run_at, get_token_hash
 from clients import OllamaClient
@@ -182,6 +182,11 @@ def process_cron_job(self, job_id: str):
             name=cron_job.name, description=cron_job.description
         )
 
+        if result.is_report:
+            # Kick-off report generation process
+            generate_report.apply_async(queue="default", kwargs={"cron_job_id": job_id})
+            logger.info("Report generation queued")
+
         # Send response
         processor.send_response(result)
 
@@ -289,20 +294,14 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
         # Process message
         result, ollama_ms = processor.process_message(message=message)
 
-        if result:
-            # Kick-off intent classification process
-            classify_intent.apply_async(
-                queue="default",
-                kwargs={
-                    "bot_id": bot_id,
-                    "msg_id": msg_id,
-                    "intent": result.intent,
-                },
-            )
-            logger.info("Intent classify process queued")
-
+        if result.response:
             # Send response
-            processor.send_response(result.response)
+            processor.send_response(response=result)
+
+            if result.is_report:
+                # Kick-off report generation process
+                generate_report.apply_async(queue="default", kwargs={"msg_id": msg_id})
+                logger.info("Report generation queued")
 
             # Trigger summary management after response is sent
             manage_conversation_summary.apply_async(
@@ -321,11 +320,10 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
                 logger.info("Pattern observation task queued")
 
         # Success Log
-        intent_label = MessageIntentType.get_readable(result.intent) if result else None
         desc = (
             LogFormatter("process_inbound_message")
             .add("bot", bot.name)
-            .add("intent", intent_label)
+            .add("is_report", result.is_report)
             .add(
                 "ollama",
                 f"{ollama_ms}ms" if ollama_ms else None,
@@ -370,57 +368,13 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
 
 
 @celery.task(bind=True, max_retries=3)
-def classify_intent(self, bot_id: str, msg_id: str, intent: str):
-    """
-    Classify a message's intent and trigger report generation if needed.
-
-    Updates the message record with the classified intent and queues
-    report generation if the intent is REPORT.
-
-    Args:
-        bot_id (str): ID of the bot processing the message
-        msg_id (str): ID of the message to classify
-        intent (str): Classified intent label (e.g., 'R' for REPORT)
-
-    Returns:
-        str: Success or error message
-
-    Raises:
-        celery.exceptions.MaxRetriesExceededError: If classification fails after all retries
-    """
-
-    try:
-        try:
-            message = Message.objects.get(id=msg_id)
-            message.intent = intent
-            message.save(update_fields=["intent"])
-
-        except Message.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
-            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
-
-        if intent == MessageIntentType.REPORT.value[0]:
-            generate_report.apply_async(
-                queue="default", kwargs={"bot_id": bot_id, "msg_id": msg_id}
-            )
-            logger.info("Report generation queued")
-
-        return "Message classified successfully"
-
-    except Exception as e:
-        logger.error("Failed to classify message", exc_info=True)
-        # Retry with exponential backoff: 60s, 300s, 900s
-        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
-
-
-@celery.task(bind=True, max_retries=3)
-def generate_report(self, bot_id: str, msg_id: str):
+def generate_report(self, msg_id: Optional[str], cron_job_id: Optional[str]):
     """
     Generate a report from bot conversation history and send to user.
 
     Args:
-        bot_id: ID of the bot to generate report for
         msg_id (str): ID of the message to retreive the actual request
+        cron_job_id: ID of cron job associated with report generation tasks
 
     Returns:
         Status message
@@ -430,6 +384,9 @@ def generate_report(self, bot_id: str, msg_id: str):
         Retries on failure with exponential backoff
     """
 
+    if not msg_id or not cron_job_id:
+        return "No msg_id or cron_job_id provided"
+
     try:
         # Validate configuration
         ollama = OllamaConfigManager.get_ollama_config()
@@ -437,19 +394,32 @@ def generate_report(self, bot_id: str, msg_id: str):
             logger.error(NO_OLLAMA)
             return NO_OLLAMA
 
-        # Get bot
-        try:
-            bot = Bot.objects.get(id=bot_id)
-        except Bot.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
-            return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id)
+        if msg_id:
+            # Get message
+            try:
+                message = Message.objects.get(id=msg_id)
+                bot = message.bot
+            except Message.DoesNotExist:
+                logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
+                return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
+        else:
+            # Get CronJob
+            try:
+                cron_job = CronJob.objects.get(id=cron_job_id)
+                bot = cron_job.bot
 
-        # Get message
-        try:
-            message = Message.objects.get(id=msg_id)
-        except Message.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
-            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
+                # Create a temporary message object
+                message = Message(
+                    bot=bot,
+                    role=MessageRole.USER.value[0],
+                    is_report=True,
+                    content=f"Task Name: {cron_job.name}\nTask Description: {cron_job.description}",
+                )
+            except CronJob.DoesNotExist:
+                logger.error(
+                    OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=cron_job_id)
+                )
+                return OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=cron_job_id)
 
         # Initialize clients and service
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)

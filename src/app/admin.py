@@ -287,8 +287,8 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
     Messages are read-only and cannot be created, modified, or deleted via admin.
     """
 
-    list_display = ("bot", "role", "get_sender", "intent", "created_at")
-    list_filter = ("role", "intent", "created_at")
+    list_display = ("bot", "role", "get_sender", "is_report", "created_at")
+    list_filter = ("role", "is_report", "created_at")
     search_fields = ("bot__name", "content")
     fields = (
         "bot",
@@ -296,7 +296,6 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
         "get_sender",
         "content",
         "is_report",
-        "intent",
         "created_at",
     )
 

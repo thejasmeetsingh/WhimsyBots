@@ -20,7 +20,7 @@ from django.db import models
 from martor.models import MartorField
 from pgvector.django import VectorField
 
-from app.choices import MCPTransportType, MessageIntentType, MessageRole
+from app.choices import MCPTransportType, MessageRole
 from app.fields import EncryptedCharField, EncryptedJSONField
 from app.utils import get_token_hash
 from app.validators import (
@@ -256,14 +256,11 @@ class Message(BaseModel):
     Conversation message in bot interaction history.
 
     Stores individual messages from users and bot responses for
-    conversation history, intent classification, and report generation.
+    conversation history, report classification, and report generation.
     """
 
     bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(max_length=1, choices=MessageRole.get_values())
-    intent = models.CharField(
-        max_length=2, choices=MessageIntentType.get_values(), null=True, blank=True
-    )
     is_report = models.BooleanField(default=False)
     content = models.TextField()
     content_embedding = VectorField(null=True, blank=True)

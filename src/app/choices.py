@@ -23,11 +23,3 @@ class MessageRole(BaseChoices):
     SYSTEM = ("S", "System")
     USER = ("U", "User")
     ASSISTANT = ("A", "Assistant")
-
-
-class MessageIntentType(BaseChoices):
-    JOURNAL = ("J", "Journal Entry")
-    REPORT = ("R", "Report Request")
-    QUESTION = ("Q", "Question/Query")
-    CRON_JOB = ("CJ", "Manage Cron Jobs")
-    OTHER = ("O", "Other")
