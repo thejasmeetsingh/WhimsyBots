@@ -83,6 +83,7 @@ class ReportGeneratorService:
                 bot=self.bot,
                 role=MessageRole.ASSISTANT.value[0],
                 content=report_response,
+                is_report=True,
             )
 
             # Convert to PDF and send

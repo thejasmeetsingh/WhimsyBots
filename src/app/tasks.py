@@ -399,6 +399,10 @@ def generate_report(self, msg_id: Optional[str], cron_job_id: Optional[str]):
             try:
                 message = Message.objects.get(id=msg_id)
                 bot = message.bot
+
+                # Update message for report identifier
+                message.is_report = True
+                message.save(update_fields=["is_report"])
             except Message.DoesNotExist:
                 logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
                 return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
