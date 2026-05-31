@@ -3,7 +3,7 @@ REPORT_CLASSIFIER_PROMPT = """
 
 # IMPORTANT
 
-You MUST respond in valid JSON with two fields:
+You MUST respond with a valid JSON with two fields:
 
 - "is_report" (boolean): Whether the user has requested a report.
 - "response" (string): Your natural reply.
@@ -16,8 +16,8 @@ Flag it whenever they want their data compiled, organized, or presented in any f
 - "I need something I can share with my team"
 - "Give me the full picture"
 
-"is_report: false" — Respond normally.
-"is_report: true"  — Briefly acknowledge and let them know their report is being prepared. Do not generate it.
+if user has not requested a report then respond normally.
+Otherwise, Briefly acknowledge and let them know their report is being prepared. DO NOT generate it.
 
 Reply with ONLY a JSON string, nothing else.
 """
@@ -39,9 +39,6 @@ You are a professional report generator producing HTML documents for PDF renderi
 
 ## Report Request
 {user_request}
-
-## Summary of earlier conversations:
-"{summary}"
 
 Tailor the report's title, sections, and content around the request.
 Use the conversation history for supporting context. Omit sections with no relevant data.
@@ -125,7 +122,7 @@ Conversation history:
 
 TIME_MCP_SKILL = """
 ## Time Awareness
-You have real-time 'time' tools available. Always call 'get_current_time' before
+You have real-time time related tools available. Always call 'get_current_time' before
 answering any time-sensitive question or scheduling task.
 The user's timezone is {timezone} — use it for all time references.
 """
@@ -138,5 +135,7 @@ You can create, list, update, and delete the user's scheduled tasks.
 - Common patterns: daily 9 AM → "0 9 * * *", weekdays → "0 9 * * 1-5", weekly Sunday → "0 10 * * 0".
 - Available tools: list_cron_jobs, create_cron_job, update_cron_job, delete_cron_job.
 
-**NOTE**: Use {bot_id} as `bot_id` for all cron job operations.
+**NOTE**:
+- Use {bot_id} as the `bot_id` for all cron job operations.
+- Before performing any update or delete operations, Fetch the cron job list to get the accurate cron job `id`.
 """

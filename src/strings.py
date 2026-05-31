@@ -1,6 +1,7 @@
 NO_OLLAMA = "No Ollama configuration found"
 OBJ_NOT_FOUND = "{obj_type} not found with id: {obj_id}"
 TOOL_EXECUTION_FAILED = "Tool execution failed"
+INVALID_TOOL = "Invalid tool '{tool}'"
 INTENT_CLASSIFICATION_FAILED = "Failed to classify message intent"
 REPORT_GENERATING = "📊 Generating your report, one moment..."
 REPORT_READY = "📄 Your report is ready!"
