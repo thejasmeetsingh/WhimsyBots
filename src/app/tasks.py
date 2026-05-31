@@ -368,7 +368,9 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
 
 
 @celery.task(bind=True, max_retries=3)
-def generate_report(self, msg_id: Optional[str], cron_job_id: Optional[str]):
+def generate_report(
+    self, msg_id: Optional[str] = None, cron_job_id: Optional[str] = None
+):
     """
     Generate a report from bot conversation history and send to user.
 
@@ -384,7 +386,7 @@ def generate_report(self, msg_id: Optional[str], cron_job_id: Optional[str]):
         Retries on failure with exponential backoff
     """
 
-    if not msg_id or not cron_job_id:
+    if not msg_id and not cron_job_id:
         return "No msg_id or cron_job_id provided"
 
     try:

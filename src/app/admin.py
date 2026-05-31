@@ -312,7 +312,7 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
 
 
 @admin.register(CronJob)
-class CronJobAdmin(BaseReadOnlyUserFilteredAdmin):
+class CronJobAdmin(BaseUserFilteredAdmin):
     """
     Admin interface for viewing cron job schedules.
     Cron jobs are read-only and cannot be created, modified, or deleted via admin.
@@ -322,6 +322,15 @@ class CronJobAdmin(BaseReadOnlyUserFilteredAdmin):
     list_display = ("bot", "cron_expression", "is_active", "created_at")
     list_filter = ("is_active", "created_at")
     search_fields = ("bot__name",)
+    readonly_fields = (
+        "bot",
+        "cron_expression",
+        "next_run_at",
+        "last_run_at",
+        "is_active",
+        "created_at",
+        "updated_at",
+    )
     fields = (
         "bot",
         "name",
