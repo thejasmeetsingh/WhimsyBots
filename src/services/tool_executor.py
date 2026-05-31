@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from app.choices import MCPTransportType
 from clients import mcp_client
-from strings import TOOL_EXECUTION_FAILED
+from strings import INVALID_TOOL, TOOL_EXECUTION_FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ class ToolExecutor:
         tool_config = self.find_tool_by_call(tool_call)
         if not tool_config:
             logger.warning("Tool not found for call: %s", tool_call.get("name"))
-            return None
+            return INVALID_TOOL.format(tool=tool_call.get("name"))
 
         try:
             result = asyncio.run(self.execute_tool(tool_config, tool_call))

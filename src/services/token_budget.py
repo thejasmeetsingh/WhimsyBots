@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 CHARS_PER_TOKEN: float = 3.5
 
+# Tool definitions are JSON with lots of nested keys, brackets, and quotes
+# that tokenize more densely than prose. Using a tighter ratio here avoids
+# underestimating tool costs which causes Ollama schema validation errors.
+TOOL_CHARS_PER_TOKEN: float = 2.5
+
+# Safety buffer subtracted on top of the measured tool definition cost.
+# Accounts for tokenizer variance across different Ollama models.
+TOOL_SAFETY_BUFFER_TOKENS: int = 50
+
 # Fixed overhead: StructuredOutput JSON schema + base system instructions
 # that are always present regardless of context. Measured conservatively.
 FIXED_OVERHEAD_TOKENS: int = 200
@@ -130,8 +139,11 @@ class TokenBudgetService:
             else DEFAULT_OUTPUT_RESERVATION_TOKENS
         )
 
-        # --- Step 3: Tool definition cost ---
-        tool_def_tokens = cls._estimate_tool_def_tokens(tool_definitions)
+        # --- Step 3: Tool definition cost (measured, not estimated) ---
+
+        # Uses actual serialized size + safety buffer so tool definitions
+        # are never underestimated and never enter the truncation pool.
+        tool_def_tokens = cls._measure_tool_def_tokens(tool_definitions)
 
         # --- Step 4 & 5: Fixed carve-outs ---
         total_reserved = (
@@ -145,9 +157,14 @@ class TokenBudgetService:
 
         if usable_tokens == 0:
             logger.warning(
-                "TokenBudget: num_ctx=%d is too small to fit fixed overhead. "
-                "Consider increasing context window or reducing MCP tools.",
+                "TokenBudget: usable_tokens=0 after reservations "
+                "(num_ctx=%d, output=%d, tool_defs=%d, overhead=%d, skills=%d). "
+                "Increase num_ctx in the admin panel or reduce connected MCP tools.",
                 num_ctx,
+                output_reservation,
+                tool_def_tokens,
+                FIXED_OVERHEAD_TOKENS,
+                SKILLS_RESERVED_TOKENS,
             )
 
         # --- Step 6: Proportional allocation ---
@@ -246,23 +263,28 @@ class TokenBudgetService:
         Truncate a single MCP tool response to char_budget.
         Appends a note so the LLM knows the response was clipped.
         """
-
         if len(response) <= char_budget:
             return response
         note = "\n[...response truncated to fit context window]"
         return response[: char_budget - len(note)] + note
 
     @classmethod
-    def _estimate_tool_def_tokens(cls, tool_definitions: list[dict]) -> int:
+    def _measure_tool_def_tokens(cls, tool_definitions: list[dict]) -> int:
         """
-        Tool definitions are JSON — chars map more closely to tokens than prose.
-        We use a slightly tighter ratio here (3.0) to be conservative.
+        Measures the actual serialized token cost of tool definitions
+        rather than estimating. Uses a tighter chars/token ratio for JSON
+        plus a safety buffer to account for tokenizer variance across models.
+
+        This ensures tool definitions are fully reserved and never enter
+        the truncation pool — partial tool schemas cause Ollama validation errors.
         """
 
         if not tool_definitions:
             return 0
-        raw = json.dumps(tool_definitions)
-        return int(len(raw) / 3.0)
+
+        raw = json.dumps(tool_definitions, separators=(",", ":"))  # compact JSON
+        measured = int(len(raw) / TOOL_CHARS_PER_TOKEN)
+        return measured + TOOL_SAFETY_BUFFER_TOKENS
 
     @staticmethod
     def _estimate_text_tokens(text: str) -> int:

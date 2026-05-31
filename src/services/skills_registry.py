@@ -49,9 +49,9 @@ class SkillsRegistry:
 
             if skill:
                 if name == "time":
-                    skill.format(timezone=timezone)
+                    skill = skill.format(timezone=timezone)
                 elif name == "cron_job":
-                    skill.format(bot_id=bot_id)
+                    skill = skill.format(bot_id=bot_id)
                 matched.append(skill)
 
         if not matched:

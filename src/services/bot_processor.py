@@ -151,7 +151,7 @@ class BotMessageProcessor:
                 tools_config=tools_config,
                 ollama=self.ollama,
                 add_keep_alive=True,
-                format=StructuredOutput.model_json_schema(),
+                format="json",
             )
 
             # Validate the response strucutre
@@ -187,8 +187,8 @@ class BotMessageProcessor:
             )
 
             # Add default time mcp server to the 'mcp_servers' list
-            default_servers = self.get_default_mcp_servers()
-            mcp_servers.extend([default_servers["time"]])
+            default_servers = MCPServer.get_default_mcp_servers()
+            mcp_servers.extend(list(default_servers.values()))
 
             tools_config = asyncio.run(
                 MCPToolsBuilder.build_tools_from_servers(mcp_servers)
@@ -211,6 +211,7 @@ class BotMessageProcessor:
                 ],
                 tools_config=tools_config,
                 ollama=self.ollama,
+                format="json",
             )
 
             # Validate the response strucutre

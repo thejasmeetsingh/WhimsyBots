@@ -90,9 +90,7 @@ class ContextAssembler:
         # 2. Fetch & truncate each source
         # System prompt — truncate from bottom (preserve the opening intent)
         raw_system_prompt = (
-            REPORT_GENERATION_PROMPT.format(
-                user_request=self.current_message.content, summary=summary_msg
-            )
+            REPORT_GENERATION_PROMPT.format(user_request=self.current_message.content)
             if is_report
             else DEFAULT_SYSTEM_PROMPT.format(
                 system_prompt=self.bot.system_prompt or "You are a helpful assistant",
@@ -124,7 +122,7 @@ class ContextAssembler:
         # Relevant memories via embeddings
         memories_block = (
             self._fit_memories(budget)
-            if self.current_message.content_embedding
+            if self.current_message.content_embedding is not None
             else None
         )
 

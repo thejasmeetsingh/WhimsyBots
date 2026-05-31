@@ -79,6 +79,9 @@ class ReportGeneratorService:
                 ollama=self.ollama,
             )
 
+            if not report_response:
+                return f"Bot '{self.bot.name}' returns an empty response", ollama_ms
+
             Message.objects.create(
                 bot=self.bot,
                 role=MessageRole.ASSISTANT.value[0],
