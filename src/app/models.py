@@ -245,7 +245,25 @@ class MCPServer(BaseModel):
             args=["-m", "mcp_server_time"],
         )
 
-        return {"cron_job": cron_job_mcp, "time": time_mcp}
+        pdf_generator = MCPServer(
+            name="pdf_generator",
+            transport=MCPTransportType.LOCAL.value[0],
+            command="python",
+            args=["-m", "pdf_generator"],
+            secrets={
+                "DB_NAME": settings.DB_NAME,
+                "DB_USER": settings.DB_USER,
+                "DB_PASSWORD": settings.DB_PASSWORD,
+                "DB_HOST": settings.DB_HOST,
+                "SECRET_KEY": settings.SECRET_KEY,
+            },
+        )
+
+        return {
+            "cron_job": cron_job_mcp,
+            "time": time_mcp,
+            "pdf_generator": pdf_generator,
+        }
 
     def __str__(self):
         return self.name
@@ -261,7 +279,6 @@ class Message(BaseModel):
 
     bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(max_length=1, choices=MessageRole.get_values())
-    is_report = models.BooleanField(default=False)
     content = models.TextField()
     content_embedding = VectorField(null=True, blank=True)
 
