@@ -5,7 +5,7 @@ DEFAULT_SYSTEM_PROMPT = """
 
 {system_prompt}
 
-## Summary of earlier conversations:
+## Overview of previous discussions between you (the assistant) and the user:
 "{summary}"
 """
 
@@ -19,12 +19,16 @@ You are executing a scheduled task. Fulfill the purpose of this cron job:
 Use available tools only if they help fulfill this specific task.
 Deliver your response directly — do not ask clarifying questions,
 do not explain what you're doing, and do not mention this is a scheduled task. Just execute.
+
+**NOTE**: Use `{bot_id}` as the `bot_id` if required by any tool.
 """
 
 SUMMARY_PROMPT = """
 You are a conversation summarizer. Below is a previous summary of an ongoing conversation, followed by newer messages.
 Produce a single updated summary that incorporates both, preserving all important context, decisions, facts, and user preferences.
 Write in third person as background context. Output only the summary text — no preamble or explanation.
+
+**NOTE:** Ensure your summary doesn't exceed {limit} characters.
 
 ## Previous Summary
 {previous_summary}
