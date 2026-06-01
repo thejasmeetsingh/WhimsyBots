@@ -1,29 +1,4 @@
-REPORT_CLASSIFIER_PROMPT = """
----
-
-# IMPORTANT
-
-You MUST respond with a valid JSON with two fields:
-
-- "is_report" (boolean): Whether the user has requested a report.
-- "response" (string): Your natural reply.
-
-Treat "is_report: true" broadly — the user doesn't need to say "report".
-Flag it whenever they want their data compiled, organized, or presented in any form. Examples:
-- "Can you put together everything I wrote this week?"
-- "How have I been doing emotionally this month?"
-- "Where did most of my money go this month?"
-- "I need something I can share with my team"
-- "Give me the full picture"
-
-if user has not requested a report then respond normally.
-Otherwise, Briefly acknowledge and let them know their report is being prepared. DO NOT generate it.
-
-Reply with ONLY a JSON string, nothing else.
-"""
-
-DEFAULT_SYSTEM_PROMPT = (
-    """
+DEFAULT_SYSTEM_PROMPT = """
 # General Information
 
 {system_prompt}
@@ -31,17 +6,17 @@ DEFAULT_SYSTEM_PROMPT = (
 ## Summary of earlier conversations:
 "{summary}"
 """
-    + REPORT_CLASSIFIER_PROMPT
-)
 
-REPORT_GENERATION_PROMPT = """
-You are a professional report generator producing HTML documents for PDF rendering via WeasyPrint.
+REPORT_GENERATION_SKILL = """
+## Report (PDF) Generator
 
-## Report Request
-{user_request}
+You can create a report in PDF format and send it to the user directly using the 'generate_and_send_report' tool.
 
-Tailor the report's title, sections, and content around the request.
-Use the conversation history for supporting context. Omit sections with no relevant data.
+**NOTE:** Below are the important points you need to consider for generating and sending the report.
+
+- Tailor the report's title, sections, and content around the user's report request.
+- Use the conversation history for supporting context. Omit sections with no relevant data.
+- Always use `{bot_id}` as the `bot_id` for the report generation operation.
 
 ## Output Rules
 - Return ONLY valid HTML. No markdown, no code fences, no text outside the HTML.
@@ -72,8 +47,7 @@ Use the conversation history for supporting context. Omit sections with no relev
 6. Appendix (if applicable) — supporting raw data tables.
 """
 
-CRON_JOB_PROMPT = (
-    """
+CRON_JOB_PROMPT = """
 You are executing a scheduled task. Fulfill the purpose of this cron job:
 
 - Task Name: {name}
@@ -83,8 +57,6 @@ Use available tools only if they help fulfill this specific task.
 Deliver your response directly — do not ask clarifying questions,
 do not explain what you're doing, and do not mention this is a scheduled task. Just execute.
 """
-    + REPORT_CLASSIFIER_PROMPT
-)
 
 SUMMARY_PROMPT = """
 You are a conversation summarizer. Below is a previous summary of an ongoing conversation, followed by newer messages.
@@ -136,6 +108,7 @@ You can create, list, update, and delete the user's scheduled tasks.
 - Available tools: list_cron_jobs, create_cron_job, update_cron_job, delete_cron_job.
 
 **NOTE**:
-- Use {bot_id} as the `bot_id` for all cron job operations.
+- Use `{bot_id}` as the `bot_id` for all cron job operations.
 - Before performing any update or delete operations, Fetch the cron job list to get the accurate cron job `id`.
+- Ensure the 'name' and 'description' contain no mention of the schedule or that its a cron job.
 """
