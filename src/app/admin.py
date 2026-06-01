@@ -62,7 +62,7 @@ class OllamaAdmin(admin.ModelAdmin):
         if change and "num_ctx" in form.changed_data:
             # Trigger summary regeneration for all active bots.
             # No bot_id = task fetches all active bots internally.
-            manage_conversation_summary.apply_async(queue="default")
+            manage_conversation_summary.apply_async(queue="default", countdown=10)
 
         super().save_model(request, obj, form, change)
 
@@ -311,7 +311,7 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
 
 
 @admin.register(CronJob)
-class CronJobAdmin(BaseUserFilteredAdmin):
+class CronJobAdmin(BaseReadOnlyUserFilteredAdmin):
     """
     Admin interface for viewing cron job schedules.
     Cron jobs are read-only and cannot be created, modified, or deleted via admin.
@@ -326,7 +326,6 @@ class CronJobAdmin(BaseUserFilteredAdmin):
         "cron_expression",
         "next_run_at",
         "last_run_at",
-        "is_active",
         "created_at",
         "updated_at",
     )
@@ -341,6 +340,12 @@ class CronJobAdmin(BaseUserFilteredAdmin):
         "created_at",
         "updated_at",
     )
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return True
 
 
 @admin.register(Log)

@@ -285,7 +285,6 @@ def convert_messages_to_ollama_format(
     History structure:
         [
             {"role": "system", "content": system_prompt},   # if provided
-            {"role": "system", "content": "Summary: ..."},  # if summary provided
             {"role": "user",      "content": "..."},         # recent messages
             {"role": "assistant", "content": "..."},
             ...
@@ -303,7 +302,6 @@ def convert_messages_to_ollama_format(
         ollama_messages.append({"role": "system", "content": system_prompt})
 
     for message in messages:
-        # Skip system messages — summary is handled above explicitly
         if message.role not in role_mapping:
             continue
         ollama_role = role_mapping[message.role]

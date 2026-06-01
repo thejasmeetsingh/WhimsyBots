@@ -20,7 +20,7 @@ from services.log_formatter import LogFormatter
 from services.observed_patterns import ObservedPatternsService
 from services.telegram_update_handler import TelegramUpdateHandler
 from services.tool_executor import MCPToolsBuilder
-from strings import NO_OLLAMA, OBJ_NOT_FOUND
+from strings import NO_BOT_RESPONSE, NO_OLLAMA, OBJ_NOT_FOUND
 from whimsybots.celery import task as celery
 
 logger = logging.getLogger(__name__)
@@ -181,6 +181,10 @@ def process_cron_job(self, job_id: str):
             name=cron_job.name, description=cron_job.description
         )
 
+        if not response:
+            logger.info(NO_BOT_RESPONSE.format(bot_name=cron_job.bot.name))
+            return
+
         # Send response
         processor.send_response(response=response)
 
@@ -287,6 +291,10 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
 
         # Process message
         response, ollama_ms = processor.process_message(message=message)
+
+        if not response:
+            logger.info(NO_BOT_RESPONSE.format(bot_name=bot.name))
+            return
 
         # Send response
         processor.send_response(response=response)
