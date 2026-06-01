@@ -24,10 +24,11 @@ from pydantic import BaseModel
 from app.choices import MessageRole
 from app.models import Bot, Message, Ollama
 from app.utils import convert_messages_to_ollama_format
-from prompts import DEFAULT_SYSTEM_PROMPT, REPORT_GENERATION_PROMPT
+from prompts import DEFAULT_SYSTEM_PROMPT
 from services.embedding import EmbeddingService
 from services.skills_registry import SkillsRegistry
 from services.token_budget import TokenBudget, TokenBudgetService
+from strings import SUMMARY_UNAVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,6 @@ class ContextAssembler:
         self,
         tool_definitions: list[dict],
         active_mcp_server_names: list[str],
-        is_report: bool = False,
     ) -> AssembledContext:
         """
         Full pipeline:
@@ -82,20 +82,16 @@ class ContextAssembler:
         )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
 
         summary = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
-        summary_msg = summary.content if summary else "Not Available, Please Ignore."
+        summary_msg = summary.content if summary else SUMMARY_UNAVAILABLE
 
         # 1. Budget
         budget = TokenBudgetService.compute(self.ollama, tool_definitions)
 
         # 2. Fetch & truncate each source
         # System prompt — truncate from bottom (preserve the opening intent)
-        raw_system_prompt = (
-            REPORT_GENERATION_PROMPT.format(user_request=self.current_message.content)
-            if is_report
-            else DEFAULT_SYSTEM_PROMPT.format(
-                system_prompt=self.bot.system_prompt or "You are a helpful assistant",
-                summary=summary_msg,
-            )
+        raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
+            system_prompt=self.bot.system_prompt or "You are a helpful assistant",
+            summary=summary_msg,
         )
 
         fitted_system_prompt = TokenBudgetService.truncate_text(

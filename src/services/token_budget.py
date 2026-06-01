@@ -20,7 +20,6 @@ import logging
 from pydantic import BaseModel
 
 from app.models import Ollama
-from app.utils import split_message
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +53,14 @@ DEFAULT_OUTPUT_RESERVATION_TOKENS: int = 512
 # Priority tiers:
 #   Tier 1 (equal) — history + embeddings: the model's primary context
 #   Tier 2         — tool_responses: the model's only window into live data
-#   Tier 3         — system_prompt + patterns: important but bounded by design
+#   Tier 3         — system_prompt + patterns + summary: important but bounded by design
 ALLOCATION_RATIOS: dict[str, float] = {
     "history": 0.30,  # 30% — recency context, Tier 1
     "embeddings": 0.30,  # 30% — semantic memory, Tier 1 (equal to history)
     "tool_responses": 0.25,  # 25% — live data from MCP tools, Tier 2
-    "system_prompt": 0.10,  # 10% — user-authored prompt, Tier 3
-    "patterns": 0.05,  # 5%  — behavioral profile, Tier 3 (already capped at 4096 chars)
+    "system_prompt": 0.05,  # 5% — user-authored prompt, Tier 3
+    "patterns": 0.05,  # 5%  — behavioral profile, Tier 3
+    "summary": 0.05,  # 5%  — past conversation summary, Tier 3
 }
 
 assert abs(sum(ALLOCATION_RATIOS.values()) - 1.0) < 1e-9, "Ratios must sum to 1.0"
@@ -86,6 +86,7 @@ class TokenBudget(BaseModel):
     # Tier 3: bounded by design, rarely need their full slice
     system_prompt_chars: int
     patterns_chars: int
+    summary_chars: int
 
     # Diagnostics
     allocation_breakdown: dict[str, int]
@@ -98,6 +99,7 @@ class TokenBudget(BaseModel):
                 "usable_tokens": self.usable_tokens,
                 "system_prompt_chars": self.system_prompt_chars,
                 "patterns_chars": self.patterns_chars,
+                "summary_chars": self.summary_chars,
                 "embedding_chars": self.embedding_chars,
                 "history_tokens": self.history_tokens,
                 "tool_response_chars": self.tool_response_chars,
@@ -185,6 +187,7 @@ class TokenBudgetService:
             tool_response_chars=cls._tokens_to_chars(allocations["tool_responses"]),
             system_prompt_chars=cls._tokens_to_chars(allocations["system_prompt"]),
             patterns_chars=cls._tokens_to_chars(allocations["patterns"]),
+            summary_chars=cls._tokens_to_chars(allocations["summary"]),
             allocation_breakdown=allocations,
         )
 
@@ -202,10 +205,7 @@ class TokenBudgetService:
             return text
 
         limit = char_limit - len(suffix)
-        truncate_text = split_message(text, limit=limit)
-        truncate_text = truncate_text[0] if truncate_text else text[:limit]
-
-        return truncate_text + suffix
+        return text[:limit] + suffix
 
     @staticmethod
     def fit_messages_to_token_budget(

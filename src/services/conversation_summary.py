@@ -8,6 +8,7 @@ from app.models import Bot, Message, Ollama
 from clients.ollama import OllamaClient
 from prompts import SUMMARY_PROMPT
 from services.token_budget import TokenBudgetService
+from strings import SUMMARY_UNAVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class ConversationSummaryService:
         # the LLM during message processing.
         budget = TokenBudgetService.compute(ollama, tool_definitions)
         self.history_token_budget = budget.history_tokens
+        self.summary_chars = budget.summary_chars
 
     def process(self) -> Optional[tuple[Message, bool]]:
         """
@@ -142,9 +144,10 @@ class ConversationSummaryService:
             for m in messages
         )
 
-        previous_summary = summary_msg.content if summary_msg else "NA"
+        previous_summary = summary_msg.content if summary_msg else SUMMARY_UNAVAILABLE
 
         prompt = SUMMARY_PROMPT.format(
+            limit=self.summary_chars,
             previous_summary=previous_summary,
             messages=formatted,
         )
