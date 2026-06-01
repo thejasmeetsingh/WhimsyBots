@@ -128,7 +128,7 @@ class TelegramClient:
 
         if response.status_code != 200:
             raise TelegramError(
-                f"Telegram API error: Status code - {response.status_code}"
+                f"Telegram API error: Status code - {response.status_code}: {response.text}"
             )
 
         data = response.json()
@@ -204,14 +204,31 @@ class TelegramClient:
         for chunk in chunks:
             self._acquire_rate_limit()  # proactive check before each chunk
 
-            result = self._post(
-                "sendMessage",
-                {
-                    "chat_id": self.chat_id,
-                    "text": chunk,
-                    "parse_mode": parse_mode,
-                },
-            )
+            # FAIL SAFE: To handle any markdown parsing errors from telegram.
+            try:
+                result = self._post(
+                    "sendMessage",
+                    {
+                        "chat_id": self.chat_id,
+                        "text": chunk,
+                        "parse_mode": parse_mode,
+                    },
+                )
+            except TelegramError as e:
+                if "can't parse entities" in str(e).lower():
+                    logger.warning(
+                        "Markdown parse failed, retrying as plain text. "
+                        "Offset error: %s",
+                        e,
+                    )
+
+                    result = self._post(
+                        "sendMessage",
+                        {
+                            "chat_id": self.chat_id,
+                            "text": chunk,
+                        },
+                    )
 
         return result
 
