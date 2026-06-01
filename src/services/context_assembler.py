@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from app.choices import MessageRole
 from app.models import Bot, Message, Ollama
 from app.utils import convert_messages_to_ollama_format
-from prompts import DEFAULT_SYSTEM_PROMPT, REPORT_GENERATION_PROMPT
+from prompts import DEFAULT_SYSTEM_PROMPT
 from services.embedding import EmbeddingService
 from services.skills_registry import SkillsRegistry
 from services.token_budget import TokenBudget, TokenBudgetService
@@ -64,7 +64,6 @@ class ContextAssembler:
         self,
         tool_definitions: list[dict],
         active_mcp_server_names: list[str],
-        is_report: bool = False,
     ) -> AssembledContext:
         """
         Full pipeline:
@@ -89,13 +88,9 @@ class ContextAssembler:
 
         # 2. Fetch & truncate each source
         # System prompt — truncate from bottom (preserve the opening intent)
-        raw_system_prompt = (
-            REPORT_GENERATION_PROMPT.format(user_request=self.current_message.content)
-            if is_report
-            else DEFAULT_SYSTEM_PROMPT.format(
-                system_prompt=self.bot.system_prompt or "You are a helpful assistant",
-                summary=summary_msg,
-            )
+        raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
+            system_prompt=self.bot.system_prompt or "You are a helpful assistant",
+            summary=summary_msg,
         )
 
         fitted_system_prompt = TokenBudgetService.truncate_text(

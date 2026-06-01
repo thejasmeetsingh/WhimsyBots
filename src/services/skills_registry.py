@@ -14,13 +14,14 @@ Adding a new default MCP server:
   3. That's it — ContextAssembler picks it up automatically via get_skills_block()
 """
 
-from prompts import CRON_JOB_SKILL, TIME_MCP_SKILL
+from prompts import CRON_JOB_SKILL, TIME_MCP_SKILL, REPORT_GENERATION_SKILL
 
 # Skill definitions
 # Each key matches the MCPServer.name of a default server.
 SKILLS: dict[str, str] = {
     "time": TIME_MCP_SKILL,
     "cron_job": CRON_JOB_SKILL,
+    "pdf_generator": REPORT_GENERATION_SKILL,
 }
 
 
@@ -50,7 +51,7 @@ class SkillsRegistry:
             if skill:
                 if name == "time":
                     skill = skill.format(timezone=timezone)
-                elif name == "cron_job":
+                elif name in {"cron_job", "pdf_generator"}:
                     skill = skill.format(bot_id=bot_id)
                 matched.append(skill)
 
