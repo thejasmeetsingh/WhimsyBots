@@ -59,6 +59,7 @@ async def generate_and_send_report(bot_id: str, contents: str) -> str:
         return contents
 
     pdf_bytes = generate_pdf(html_contents)
+    logger.info("Report generated successfully")
 
     try:
         async with get_session() as session:
