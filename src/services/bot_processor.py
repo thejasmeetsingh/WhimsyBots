@@ -115,6 +115,7 @@ class BotMessageProcessor:
 
             # Add default time mcp server to the 'mcp_servers' list
             default_servers = MCPServer.get_default_mcp_servers()
+            default_servers.pop("cron_job")  # Remove 'cron_job' MCP server
             mcp_servers.extend(list(default_servers.values()))
 
             tools_config = asyncio.run(
@@ -132,7 +133,7 @@ class BotMessageProcessor:
                     {
                         "role": "user",
                         "content": CRON_JOB_PROMPT.format(
-                            name=name, description=description
+                            name=name, description=description, bot_id=str(self.bot.id)
                         ),
                     }
                 ],

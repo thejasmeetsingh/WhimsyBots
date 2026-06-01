@@ -28,6 +28,7 @@ from prompts import DEFAULT_SYSTEM_PROMPT
 from services.embedding import EmbeddingService
 from services.skills_registry import SkillsRegistry
 from services.token_budget import TokenBudget, TokenBudgetService
+from strings import SUMMARY_UNAVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class ContextAssembler:
         )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
 
         summary = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
-        summary_msg = summary.content if summary else "Not Available, Please Ignore."
+        summary_msg = summary.content if summary else SUMMARY_UNAVAILABLE
 
         # 1. Budget
         budget = TokenBudgetService.compute(self.ollama, tool_definitions)
