@@ -1,4 +1,5 @@
 import logging
+
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import column, select, table
 
@@ -10,7 +11,6 @@ from pdf_generator.helpers import (
     generate_pdf,
     send_document,
 )
-
 
 logger = logging.getLogger(__name__)
 mcp = FastMCP(name="pdf-generator")
@@ -59,7 +59,9 @@ async def generate_and_send_report(bot_id: str, contents: str) -> str:
         return contents
 
     pdf_bytes = generate_pdf(html_contents)
-    logger.info("Report generated successfully")
+    logger.info(
+        {"tool": "generate_and_send_report", "msg": "Report generated successfully"}
+    )
 
     try:
         async with get_session() as session:
@@ -80,4 +82,5 @@ async def generate_and_send_report(bot_id: str, contents: str) -> str:
 
         return "PDF generated and sent to the user successfully ✅"
     except Exception as e:
+        logger.error(str(e), exc_info=True)
         return f"Error caught: {str(e)}"

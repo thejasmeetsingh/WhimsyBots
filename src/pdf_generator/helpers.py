@@ -4,9 +4,9 @@ import io
 import logging
 import os
 import re
+import uuid
 from datetime import datetime
 from typing import Optional
-import uuid
 
 import requests
 from cryptography.fernet import Fernet
@@ -97,7 +97,7 @@ def extract_html(text: str) -> Optional[str]:
     return None
 
 
-def send_document(self, chat_id: str, token: str, file_bytes: bytes) -> dict:
+def send_document(chat_id: str, token: str, file_bytes: bytes) -> dict:
     """
     Send a document (file) to the chat.
     Sends binary file content as a Telegram document.
