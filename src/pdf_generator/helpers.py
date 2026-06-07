@@ -1,3 +1,5 @@
+"""Helper utilities for PDF Generator"""
+
 import base64
 import hashlib
 import io

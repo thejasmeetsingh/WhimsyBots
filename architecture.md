@@ -56,27 +56,13 @@ User sends message via Telegram
       → Queue process_inbound_message task
   → process_inbound_message task:
       → BotMessageProcessor.process_message():
-          → Builds tools from bot's active MCPServers + default servers (time, cron_job)
-          → Constructs system_prompt with bot_id and timezone
-          → Runs Ollama tool_calling_loop with StructuredOutput JSON schema format
-          → LLM returns: {intent: J|R|Q|CJ|O, response: string}
-      → Stores response to DB (role=ASSISTANT, intent=classified)
+          → Builds tools from bot's active MCPServers + default servers (time, cron_job, pdf_generator)
+          → Runs Ollama tool_calling_loop with tool calling format
+          → LLM can call any available MCP tools including pdf_generator
+          → Returns: response string (intent detection is now implicit in tool usage)
+      → Stores response to DB (role=ASSISTANT)
       → Sends response via TelegramClient.send_message()
-      → If intent=='R': Queue generate_report task
-```
-
-#### Report Generation (Async)
-```
-Intent detected as REPORT (intent=='R')
-  → generate_report task queued
-  → ReportGeneratorService.generate_report():
-      → Fetches bot's conversation history
-      → Prompts LLM with REPORT_GENERATION_PROMPT to create HTML
-      → Extracts HTML from response (handles markdown code fences)
-      → WeasyPrint converts HTML → PDF (in memory)
-      → Sends PDF via TelegramClient.send_document()
-      → Sends confirmation message via TelegramClient.send_message()
-      → Stores assistant message to DB
+      → If user requested PDF generation via tool call: response already includes PDF context
 ```
 
 ---
@@ -87,32 +73,43 @@ Intent detected as REPORT (intent=='R')
 WhimsyBots/
   src/
     whimsybots/          ← Django project settings, Celery config, URLs
-      settings.py
-      celery.py
-      urls.py
-      views.py
+      settings.py        ← Django settings, database, Celery configuration
+      celery.py          ← Celery app and task routing setup
+      urls.py            ← URL routing and webhook endpoints
+      views.py           ← Django views (webhook handlers)
+      wsgi.py            ← WSGI application entry point
     
     app/                 ← Core application
       models.py          ← All data models (Bot, Message, CronJob, Log, Ollama, MCPServer)
-      tasks.py           ← Celery tasks (polling, processing, report generation)
-      choices.py         ← Enum-based choices (roles, intents, transports)
+      tasks.py           ← Celery tasks (polling, message processing, summaries, embeddings)
+      choices.py         ← Enum-based choices (message roles, transports)
+      fields.py          ← Custom Django fields (encrypted, vector)
       validators.py      ← Custom validators (cron, transport)
-      utils.py           ← Utility functions (PDF gen, message splitting, etc.)
+      utils.py           ← Utility functions (message splitting, conversions, etc.)
       admin.py           ← Django admin configuration
       forms.py           ← Django forms
-      config/
-        celery_config.py ← Celery configuration constants
-      managers/
-        telegram_client.py ← Telegram client manager
-        ollama_config.py   ← Ollama config manager
-      services/
-        bot_processor.py         ← Main bot message processing with tool calling
-        report_generator.py      ← PDF report generation service
-        telegram_update_handler.py ← Incoming Telegram update handler
-        tool_calling_coordinator.py ← Ollama tool calling loop
-        tool_executor.py         ← MCP tool execution
+      apps.py            ← Django app configuration
+      tests.py           ← Unit tests (test suite)
       migrations/
     
+    managers/
+        telegram_client.py ← Telegram client manager
+        ollama_config.py   ← Ollama config manager
+    
+    services/
+        bot_processor.py           ← Main bot message processing with tool calling
+        context_assembler.py       ← Message history and context assembly
+        conversation_summary.py    ← Conversation summarization service
+        embedding.py              ← Message embedding generation
+        observed_patterns.py      ← Pattern observation and regeneration
+        log_formatter.py           ← Structured logging utility
+        rate_limiter.py            ← Rate limiting for external APIs
+        skills_registry.py         ← MCP server tool descriptions/capabilities
+        telegram_update_handler.py ← Incoming Telegram update handler
+        token_budget.py            ← Token allocation and context window management
+        tool_calling_coordinator.py ← Ollama tool calling loop
+        tool_executor.py           ← MCP tool execution
+
     clients/               ← External API clients
       telegram.py          ← Telegram Bot API client
       ollama.py            ← Ollama LLM client
@@ -126,13 +123,23 @@ WhimsyBots/
       models.py            ← SQLAlchemy models (mirrors app.models.CronJob)
       helpers.py           ← Utility functions for cron parsing, validation
     
+    pdf_generator/         ← Standalone PDF Generator MCP Server (FastMCP) - NEW
+      __init__.py
+      __main__.py          ← Entry point (python -m pdf_generator)
+      server.py            ← MCP server definition with PDF generation tools
+      db.py                ← Async database session management
+      helpers.py           ← Utility functions for HTML parsing, PDF rendering
+    
     static/                ← Static files (admin, martor, plugins)
   
   manage.py
+  prompts.py             ← LLM prompt templates and system prompts
+  strings.py             ← Error messages and user-facing strings
   requirements.txt
   docker-compose.yml
   Dockerfile
   Makefile
+  gunicorn.conf.py       ← Gunicorn WSGI server configuration
 ```
 
 ---
@@ -202,9 +209,11 @@ Every message in a conversation — inbound and outbound.
 class Message(BaseModel):
     bot             = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name='messages')
     role            = models.CharField(max_length=1, choices=MessageRole.get_values())  # 'S', 'U', 'A'
-    intent          = models.CharField(max_length=2, choices=MessageIntentType.get_values(), null=True, blank=True)  # Classified by LLM
     content         = models.TextField()
+    content_embedding = VectorField(null=True, blank=True)  # For similarity search & context retrieval
 ```
+
+**Note:** Intent field has been removed. Intent classification is now implicit in tool selection during message processing.
 
 #### `CronJob`
 Scheduled job definition for bot execution using cron expressions. Each job has a name and description that define what the bot should do when executed.
@@ -237,13 +246,6 @@ class MessageRole(BaseChoices):
     SYSTEM    = ('S', 'System')
     USER      = ('U', 'User')
     ASSISTANT = ('A', 'Assistant')
-
-class MessageIntentType(BaseChoices):
-    JOURNAL  = ('J', 'Journal Entry')
-    REPORT   = ('R', 'Report Request')
-    QUESTION = ('Q', 'Question/Query')
-    CRON_JOB = ('CJ', 'Manage Cron Jobs')
-    OTHER    = ('O', 'Other')
 
 class MCPTransportType(BaseChoices):
     LOCAL  = ('L', 'Local')   # Stdio-based (command + args)
@@ -297,22 +299,23 @@ def telegram_msg_handler(bot_token: str, update: dict):
 ```
 
 #### `process_inbound_message`
-Main message processing pipeline with embedded intent detection via structured output.
+Main message processing pipeline with tool calling loop.
 
 ```python
 @celery.task(bind=True, max_retries=3)
 def process_inbound_message(bot_id: str, msg_id: str):
     # 1. Validate Ollama configuration
-    # 2. Initialize BotMessageProcessor
-    # 3. BotMessageProcessor.process_message():
-    #    - Builds tools from bot's MCPServers + default servers (time, cron_job)
-    #    - Sends responsive typing indicators during processing
-    #    - Runs Ollama tool_calling_loop with StructuredOutput JSON schema
-    #    - Returns {intent: J|R|Q|CJ|O, response: string}
-    # 4. Store intent in Message.intent field
+    # 2. Fetch bot and message from database
+    # 3. Initialize BotMessageProcessor
+    # 4. BotMessageProcessor.process_message():
+    #    - Builds tools from bot's MCPServers + default servers (time, cron_job, pdf_generator)
+    #    - Sends responsive typing indicator during processing
+    #    - Runs Ollama tool_calling_loop with all available tools
+    #    - LLM decides which tools to call (if any)
+    #    - Returns final response string
     # 5. Send response via Telegram with intelligent message splitting (>4096 chars)
-    # 6. If intent=='R': queue generate_report task
-    # 7. If context window approaching limit: queue manage_conversation_summary task
+    # 6. Queue manage_conversation_summary task if context window approaching limit
+    # 7. Conditionally regenerate observed patterns if threshold met
     # 8. Handles Telegram rate limit errors with retry + exponential backoff
     # 9. Retry on failure with exponential backoff
 ```
@@ -333,23 +336,6 @@ def process_cron_job(job_id: str):
     # 5. Send response via Telegram
     # 6. Update CronJob.next_run_at (via croniter) and last_run_at
     # 7. Retry on failure with exponential backoff
-```
-
-#### `generate_report`
-Generates and sends a PDF report in response to a REPORT intent.
-
-```python
-@celery.task(bind=True, max_retries=3)
-def generate_report(bot_id: str):
-    # 1. Initialize ReportGeneratorService
-    # 2. Generate HTML report via Ollama with REPORT_GENERATION_PROMPT
-    # 3. Extract HTML from LLM response (handles markdown wrappers)
-    # 4. Convert HTML to PDF via WeasyPrint
-    # 5. Send PDF via TelegramClient.send_document() with summary message
-    # 6. Send confirmation message with intelligent message splitting
-    # 7. Store bot's response message to DB
-    # 8. Handles Telegram rate limit errors with retry + exponential backoff
-    # 9. Retry on failure with exponential backoff
 ```
 
 #### `manage_conversation_summary`
@@ -406,18 +392,12 @@ class TelegramClient:
     def send_message(self, text: str, parse_mode: str = "Markdown") -> dict:
         # Auto-splits messages > 4096 chars
         # Supports Markdown, HTML, or plain text
-    
-    def send_document(self, file_bytes: bytes, filename: str, caption: str = "") -> dict:
-        # Sends PDF or other files
-    
+
     def send_typing_action(self) -> dict:
         # Shows "typing..." indicator
     
     def set_webhook(self, url: str, allowed_updates: list) -> dict:
         # Registers webhook with Telegram
-    
-    def get_updates(self, offset: int = 0, timeout: int = 20) -> list:
-        # Polls for new messages (polling mode)
 ```
 
 ### 6.3 Telegram Client Manager
@@ -457,11 +437,13 @@ Telegram User Message
   → Message saved to DB (role=USER)
   → Typing indicator sent (responsive)
   → process_inbound_message task queued
-  → BotMessageProcessor processes with tools
+  → BotMessageProcessor processes with tools (time, cron_job, pdf_generator + custom)
+  → LLM calls tools as needed (implicit intent through tool usage)
   → Response sent via TelegramClient.send_message() (intelligent splitting for >4096 chars)
-  → Response saved to DB (role=ASSISTANT) with embedded intent classification
-  → If REPORT intent: generate_report task queued
+  → Response saved to DB (role=ASSISTANT)
   → If context window near limit: manage_conversation_summary task queued
+  → If context needs embeddings: generate_embedding task queued
+  → If pattern update needed: regenerate_observed_patterns task queued
   → If Telegram rate limited: retry with exponential backoff
 ```
 
@@ -482,71 +464,53 @@ Celery Beat (every minute)
 
 ---
 
-## 7. Intent Detection & Structured Output
+## 7. Tool Calling with MCP Integration
 
-Intent detection is **embedded** into `BotMessageProcessor.process_message()` and returns via a structured JSON schema. This ensures intent is always available immediately without needing a separate classification task.
+Tool calling is now the primary mechanism for intent classification. Instead of explicit intent detection, the LLM determines what action to take by calling available MCP tools:
 
-### 7.1 StructuredOutput Model
+### 7.1 Tool-Based Intent
 
-The LLM is instructed to respond in a specific JSON format using Ollama's `format` parameter:
+Instead of returning structured `{intent, response}`, the LLM now:
+1. Analyzes the user message
+2. Decides which tools to call (if any)
+3. Executes tools to accomplish the user's goal
+4. Provides natural language response
 
-```python
-class StructuredOutput(BaseModel):
-    intent: Literal["J", "R", "Q", "CJ", "O"]  # Intent code
-    response: str  # Natural language response to user
-```
+**Examples:**
+- User: "Can you generate a PDF report?" → LLM calls `pdf_generator.generate_pdf()` tool
+- User: "Schedule a daily report at 9 AM" → LLM calls `cron_job.create_cron_job()` tool
+- User: "What time is it?" → LLM calls `time.get_current_time()` tool
+- User: "Just chat with me" → LLM provides response without calling tools
 
-When calling Ollama, we pass `format=StructuredOutput.model_json_schema()` ensuring the LLM responds with valid JSON matching this schema.
+### 7.2 Available Tools
 
-### 7.2 Intent Types
+Every message processing includes:
+- **time** MCP server: Get current time and timezone info
+- **cron_job** MCP server: Manage scheduled tasks
+- **pdf_generator** MCP server: Generate PDF reports (NEW)
+- **Custom MCPServers**: Any bot-specific servers configured in admin
 
-```python
-class MessageIntentType(BaseChoices):
-    JOURNAL  = ('J', 'Journal Entry')     # User writing/reflection
-    REPORT   = ('R', 'Report Request')    # User wants summary/PDF/compilation
-    QUESTION = ('Q', 'Question/Query')    # User asking something
-    CRON_JOB = ('CJ', 'Manage Cron Jobs') # Scheduling commands (cron_job MCP server)
-    OTHER    = ('O', 'Other')             # Everything else
-```
-
-### 7.3 Classification Flow
+### 7.3 Tool Execution Flow
 
 ```
 process_inbound_message task:
   → BotMessageProcessor.process_message():
-      → Ollama receives system prompt with DEFAULT_SYSTEM_PROMPT
-      → System prompt includes instructions to respond as JSON with intent & response
-      → Ollama tool_calling_loop runs with format=StructuredOutput.model_json_schema()
-      → LLM returns: {\"intent\": \"J\", \"response\": \"...\"}
-      → Response parsed and validated by _parse_llm_response()
-      → Returns StructuredOutput object (intent + response)
-  → Intent stored in Message.intent field
+      → Build tools from all active MCPServers (custom + defaults)
+      → Ollama receives system prompt + context + tools
+      → run_tool_calling_loop():
+          → LLM responds with potential tool calls
+          → For each tool call:
+              → ToolExecutor.execute_tool_call_sync()
+              → Tool result appended to history
+              → Loop continues if LLM wants more tools
+          → Loop ends when LLM has final response
+      → Return final LLM response
   → Response sent to user
-  → If intent=='R': generate_report task queued
-```
-
-### 7.4 Report Generation
-
-When intent==\"R\" (REPORT):
-
-```python
-# generate_report task workflow:
-# 1. Fetch bot's conversation Message history
-# 2. Fetch active MCPServers for bot
-# 3. ReportGeneratorService.generate_report():
-#    - Build tools from MCPServers
-#    - Run Ollama tool_calling_loop with REPORT_GENERATION_PROMPT
-#    - LLM generates HTML with inline CSS
-#    - extract_html() parses HTML from response (handles markdown fences)
-# 4. WeasyPrint converts HTML → PDF (in memory)
-# 5. TelegramClient.send_document() sends PDF
-# 6. TelegramClient.send_message() sends confirmation
-# 7. Store assistant message to DB
 ```
 
 ---
 
-## 8. Model Context Protocol (MCP) Integration
+## 8. Model Context Protocol (MCP) Integration - REMOVED OLD SECTION
 
 The system integrates with external tools and services via MCP, supporting both local and remote servers.
 
@@ -635,14 +599,14 @@ BotMessageProcessor.process_message()
 
 ### 8.7 Default MCP Servers
 
-Every bot automatically includes two default MCP servers without explicit configuration:
+Every bot automatically includes three default MCP servers without explicit configuration:
 
 #### Time Server
 - **Purpose:** Provides current time and timezone information for LLM context
 - **Implementation:** `mcp_server_time` (PyPI package)
 - **Transport:** LOCAL (stdio-based)
 - **Command:** `python -m mcp_server_time`
-- **When Used:** Added to all bots by default in `BotMessageProcessor.get_default_mcp_servers()`
+- **When Used:** Added to all message processing flows
 - **Tools Available:** `get_current_time`, timezone-aware helpers
 
 #### Cron Job Manager Server
@@ -658,6 +622,17 @@ Every bot automatically includes two default MCP servers without explicit config
   - `update_cron_job(id, bot_id, name?, description?, cron_expression?, is_active?)` — Update existing job
   - `delete_cron_job(id, bot_id)` — Delete a job
 - **Example Use Case:** User asks \"Schedule a daily report at 9 AM\" → LLM calls `create_cron_job` with name=\"Daily Report\", cron_expression=\"0 9 * * *\"
+
+#### PDF Generator Server
+- **Purpose:** Generates PDF reports from HTML content with advanced formatting options
+- **Implementation:** Standalone module in `src/pdf_generator/` with FastMCP
+- **Transport:** LOCAL (stdio-based)
+- **Command:** `python -m pdf_generator`
+- **When Used:** Added to all message processing flows (NEW - always available, not a separate async task)
+- **Tools Available:**
+  - `generate_pdf(html_content, options?)` — Convert HTML to PDF with CSS styling
+- **Key Change:** PDF generation is now inline during message processing. When a user asks for a PDF, the LLM directly calls the tool instead of queuing an async task
+- **Example Use Case:** User: \"Generate a PDF report\" → LLM calls `pdf_generator.generate_pdf()` with formatted HTML → Response includes PDF link/attachment
 
 ### 8.8 Server Instantiation
 
@@ -685,6 +660,20 @@ time_mcp = MCPServer(
     args=["-m", "mcp_server_time"],
 )
 
+pdf_generator = MCPServer(
+    name="pdf_generator",
+    transport=MCPTransportType.LOCAL.value[0],
+    command="python",
+    args=["-m", "pdf_generator"],
+    secrets={
+        "DB_NAME": settings.DB_NAME,
+        "DB_USER": settings.DB_USER,
+        "DB_PASSWORD": settings.DB_PASSWORD,
+        "DB_HOST": settings.DB_HOST,
+        "SECRET_KEY": settings.SECRET_KEY,
+    },
+)
+
 # Then mixed with bot's active MCPServers for tool discovery
 mcp_servers = list(MCPServer.objects.filter(bot_id=bot.id, is_active=True))
 default_servers = get_default_mcp_servers()
@@ -704,16 +693,18 @@ The admin panel is the primary UI for bot configuration and monitoring.
   - Displays Telegram bot token, scheduling info, Ollama model config
   - Filter by active/inactive, creator
   - UUID-based IDs displayed
+  - Task management: `manage_conversation_summary` with countdown delay for optimized scheduling
 
 - **CronJob admin:**
   - Inline editor on Bot detail page
   - Shows name, description, cron_expression, next_run_at, last_run_at
   - Filter by active/inactive, bot
+  - Uses `BaseReadOnlyUserFilteredAdmin` with explicit `has_change_permission` and `has_delete_permission` methods for better control
 
 - **Message admin:**
   - Read-only message thread viewer (like a chat log)
-  - Filterable by bot, intent, role
-  - Shows content preview
+  - Filterable by bot, role, created date
+  - Shows content preview and embedding status
 
 - **Log admin:**
   - Filterable by bot, success/failure, date
@@ -728,13 +719,20 @@ The admin panel is the primary UI for bot configuration and monitoring.
   - Single instance enforcement (only one config allowed)
   - Test connection button (future)
 
-### 9.2 Admin Permissions
+### 9.2 Response Validation in Admin Interface
+
+- **Task Monitoring:** Added response validation with logging in:
+  - `process_cron_job`: Validates non-empty responses before sending to Telegram
+  - `process_inbound_message`: Validates responses and logs via LogFormatter for debugging
+  - Uses `NO_BOT_RESPONSE` error string for null/empty response handling
+
+### 9.3 Admin Permissions
 
 - **Superusers:** Full access to all bots and configurations
 - **Regular staff:** Can only see bots they created (`created_by`)
 - **Filtering:** By creator, active status, date ranges
 
-### 9.3 Martor Integration
+### 9.4 Martor Integration
 
 Markdown editor enabled for:
 - `Bot.system_prompt`
@@ -748,9 +746,53 @@ Features:
 
 ---
 
-## 10. Settings Structure
+## 9.5 Error Handling in Telegram Client
 
-### 10.1 Environment Variables
+Enhanced error handling with fallback mechanisms:
+- **Error Messages:** Include response text from Telegram API for better debugging
+- **Markdown Parsing:** Fallback to plain text if markdown parsing fails
+  - Catches parse entity errors and retries message as plain text
+  - Ensures message delivery even if formatting fails
+- **Benefit:** Improved reliability and easier troubleshooting of Telegram integration issues
+
+---
+
+## 10. Token Budgeting System
+
+### 10.1 Token Allocation Ratios
+
+The system allocates tokens across different components:
+
+```python
+ALLOCATION_RATIOS = {
+    "system_prompt": 0.05,      # 5% (reduced from 10%)
+    "tools": 0.15,              # 15% for tool definitions
+    "context": 0.50,            # 50% for conversation context
+    "response": 0.25,           # 25% for LLM output buffer
+    "summary": 0.05,            # 5% for conversation summaries (NEW)
+}
+```
+
+### 10.2 Character Budget for Summaries
+
+- **Summary Allocation:** 5% of total token budget converted to character budget
+- **SUMMARY_UNAVAILABLE Constant:** Used for consistent fallback messaging when summary generation fails
+- **Constraint:** Character limit enforced in `SUMMARY_PROMPT` for consistent summarization
+- **Integration:** `ConversationSummaryService` uses `summary_chars` from TokenBudget for proper text fitting
+
+### 10.3 Token Measurement Improvements
+
+- **Method Rename:** `_estimate_tool_def_tokens` → `_measure_tool_def_tokens` for accuracy
+- **Tool Measurement Constants:**
+  - `TOOL_CHARS_PER_TOKEN`: More accurate character-to-token conversion
+  - `TOOL_SAFETY_BUFFER_TOKENS`: Safety margin for tool definitions
+- **Benefit:** Improved token estimation accuracy prevents context window overflow
+
+---
+
+## 11. Settings Structure
+
+### 11.1 Environment Variables
 
 ```python
 # Required
@@ -766,7 +808,7 @@ CELERY_RESULT_BACKEND   = os.getenv("CELERY_RESULT_BACKEND")   # redis://...
 WEBHOOK_BASE_URL        = os.getenv("WEBHOOK_BASE_URL", "https://localhost:8000")
 ```
 
-### 10.2 Celery Configuration
+### 11.2 Celery Configuration
 
 ```python
 CELERY_QUEUES = {
@@ -787,7 +829,7 @@ CELERY_BEAT_SCHEDULE = {
 }
 ```
 
-### 10.3 Logging Configuration
+### 11.3 Logging Configuration
 
 JSON structured logging with custom formatter:
 
@@ -806,7 +848,7 @@ logging.config.dictConfig({
 })
 ```
 
-### 10.4 Static Files
+### 11.4 Static Files
 
 ```python
 STATIC_URL = "/static/"
@@ -815,7 +857,7 @@ STATIC_ROOT = os.path.join(BASE_DIR, "static")
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 ```
 
-### 10.5 Martor Configuration
+### 11.5 Martor Configuration
 
 ```python
 MARTOR_THEME = "bootstrap"
@@ -832,7 +874,7 @@ MARTOR_ENABLE_CONFIGS = {
 
 ---
 
-## 11. Tech Stack Summary
+## 12. Tech Stack Summary
 
 | Concern | Technology | Notes |
 |---------|-----------|-------|
@@ -871,7 +913,7 @@ MARTOR_ENABLE_CONFIGS = {
 
 ---
 
-## 12. Deployment Architecture
+## 13. Deployment Architecture
 
 ### 12.1 Components
 
@@ -931,9 +973,24 @@ services:
   ollama:    # Optional: Local LLM (can be external)
 ```
 
+### 13.4 MCP Servers in Docker
+
+With the addition of PDF Generator as MCP Server:
+
+```yaml
+services:
+  web:           # Django + Gunicorn
+  celery:        # Celery worker (default queue)
+  beat:          # Celery beat scheduler
+  redis:         # Message broker
+  postgres:      # Database
+  ollama:        # Optional: Local LLM (can be external)
+  pdf_generator: # NEW: PDF Generator MCP Server (optional, can run on same process)
+```
+
 ---
 
-## 12. Build Status
+## 14. Build Status
 
 ### ✅ Completed
 
@@ -947,13 +1004,11 @@ services:
 | Telegram client | ✅ | send_message, send_document, typing, webhook + rate limit handling + intelligent message splitting |
 | Telegram token encryption | ✅ | telegram_bot_token encrypted + token_hash for lookup |
 | MCP client | ✅ | Local + remote transport support with stdio and HTTP |
-| Celery tasks | ✅ | All core tasks: telegram_msg_handler, process_inbound_message, process_cron_job, generate_report, manage_conversation_summary, setup_bot_webhook |
+| Celery tasks | ✅ | Core tasks: telegram_msg_handler, process_inbound_message, process_cron_job, manage_conversation_summary, setup_bot_webhook, generate_embedding, regenerate_observed_patterns |
 | Tool calling loop | ✅ | Async tool execution with Ollama via tool_calling_coordinator |
-| StructuredOutput | ✅ | Pydantic-based JSON schema for intent + response |
-| Embedded intent detection | ✅ | Intent classification integrated into process_message with JSON schema format |
-| Report generation | ✅ | HTML → PDF → Telegram (async via generate_report task) with summary support |
+| Report generation | ✅ | MCP Server-based PDF generation called directly by LLM (no separate async task) |
 | Cron job processing | ✅ | Dedicated process_cron_job task with CronJob.description support |
-| Default MCP servers | ✅ | Time server + Cron Job Manager (FastMCP) injected automatically |
+| Default MCP servers | ✅ | Time, Cron Job Manager, PDF Generator (FastMCP) - always available, not persisted |
 | Cron Job MCP Server | ✅ | Standalone module with list/create/update/delete tools (FastMCP) |
 | Multi-queue Celery | ✅ | beat + default queues |
 | Comprehensive logging | ✅ | JSON logging configured with LogFormatter for descriptions |
@@ -962,45 +1017,86 @@ services:
 | Telegram rate limiting | ✅ | Rate limit retry handling with exponential backoff in tasks |
 | Message splitting | ✅ | Intelligent message splitting for responses > 4096 chars |
 | Typing indicators | ✅ | Responsive typing indicators during processing |
-| Conversation context management | ✅ | ConversationSummaryService with manage_conversation_summary task |
-| Celery Flower monitoring | ✅ | Monitoring service in docker-compose |
+| Conversation context management | ✅ | ConversationSummaryService with manage_conversation_summary task and countdown delay |
+| Celery Flower monitoring | ✅ | Monitoring service in docker-compose with persistent volume |
+| Token budgeting with summaries | ✅ | 5% allocation for conversation summaries with character limits |
+| PDF Generator MCP Server | ✅ | Standalone MCP server for PDF generation with FastMCP framework |
+| Enhanced Telegram error handling | ✅ | Response text in errors, markdown parsing fallback to plain text |
+| Response validation | ✅ | Null/empty response checks in process_cron_job and process_inbound_message tasks |
+| Code organization | ✅ | Alphabetically organized imports across all modules for consistency |
 
 ---
 
-## 13. Key Design Decisions
+## 15. Key Design Decisions
 
-### 13.1 UUID Primary Keys
+### 15.1 UUID Primary Keys
 - **Why:** Security through obscurity, distributed system friendly
 - **Trade-off:** Slightly larger indexes, less human-readable
 
-### 13.2 Async Tool Calling
+### 15.2 Async Tool Calling
 - **Why:** MCP client requires async/await for stdio/HTTP connections
 - **Implementation:** `asyncio.run()` in synchronous Celery tasks
 
-### 13.3 Embedded Intent Detection with StructuredOutput
-- **Why:** Fast response time, intent always available, reduced task overhead
-- **Flow:** Process → Detect Intent (JSON schema format) → Respond → Act (if needed)
-- **Benefit:** Single LLM call returns both intent and response; no intermediate tasks
-- **Implementation:** Ollama `format` parameter with Pydantic schema
+### 15.3 Tool-Based Intent
+- **Old Design:** StructuredOutput with explicit intent classification in LLM response
+- **Current Design:** Intent is implicit in which tools the LLM calls
+- **Why Changed:** 
+  - Tool-based intent is more flexible and powerful
+  - Aligns with MCP design philosophy (actions via tools, not metadata)
+  - Simpler to maintain (no intent enum sync needed)
+  - LLM naturally chooses best tool for the task
+- **Benefit:** Better intent coverage through tool combinations (e.g., create_cron_job + send_notification)
 
-### 13.4 Default MCP Servers
-- **Why:** Provide core functionality (time, cron management) without manual setup
+### 15.4 Default MCP Servers
+- **Why:** Provide core functionality (time, cron management, pdf generator) without manual setup
 - **Instantiation:** Temporary in-memory MCPServer objects created per message
 - **Benefit:** Always available, extensible with custom MCPServers
 
-### 13.5 Multi-Queue Celery
+### 15.5 Multi-Queue Celery
 - **Why:** Isolate beat scheduling from worker processing
 - **Benefit:** Prevents worker overload from affecting scheduler
 
-### 13.6 Service Layer Pattern
+### 15.6 Service Layer Pattern
 - **Why:** Clean separation of concerns, testability
 - **Structure:** Tasks → Services → Clients → External APIs
 
-### 13.7 Tool Calling Abstraction
+### 15.7 Tool Calling Abstraction
 - **Why:** Unified interface for MCP tools regardless of transport
 - **Benefit:** Easy to add new MCP servers without code changes
 
-### 13.8 CronJob with Description
+### 15.8 CronJob with Description
 - **Why:** LLM needs context about what each scheduled job does
-- **Usage:** Description passed to `process_cron_job` in CRON_JOB_PROMPT
+- **Usage:** Description passed to `process_cron_job` in CRON_JOB_PROMPT with bot_id for context
 - **Benefit:** LLM can execute task semantically correct without hardcoded logic
+
+### 15.9 PDF Generation via MCP Server (Inline Tool Calling)
+- **Why:** Inline PDF generation eliminates async task overhead and provides instant feedback
+- **Old Design:** Separate async `generate_report` task triggered by intent detection
+- **Current Design:** 
+  - PDF generator is a default MCP server available in all flows
+  - LLM calls `pdf_generator.generate_pdf()` directly when needed
+  - Results included in same response (no task queueing)
+- **Benefits:**
+  - Faster user experience (no task queue delays)
+  - Simpler architecture (no report-specific task)
+  - Better modularity (PDF server runs independently)
+  - More flexible (LLM can call PDF tool any time, not just on REPORT intent)
+
+### 15.10 Token Budget with Summary Allocation
+- **Why:** Prevent context window overflow when accumulating summaries
+- **Implementation:** Dynamic character budget allocation based on token constraints
+- **Benefit:** Consistent conversation length management with automatic summarization
+
+### 15.11 Selective MCP Server Inclusion
+- **Why:** Different flows need different tools (e.g., reports don't need cron_job management)
+- **Implementation:** Conditional server inclusion based on processing context
+- **Benefit:** Reduced tool noise, faster LLM processing, clearer user intent
+
+### 15.12 Removal of Async Task-Based Report Generation (DESIGN SHIFT)
+- **Why:** Inline tool calling is faster and simpler than task queuing
+- **Trade-off:**
+  - **Removed:** Separate async task, no background processing
+  - **Gained:** Instant results, simpler code, fewer moving parts
+- **Implementation:** Report generation now happens via MCP tool call during message processing
+- **When to Use:** For operations that can complete synchronously (like PDF generation)
+- **Limitation:** Very long-running PDFs might block message response (mitigated by LLM timeout controls)
