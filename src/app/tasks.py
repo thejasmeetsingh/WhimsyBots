@@ -8,7 +8,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from app.choices import MessageRole
-from app.models import Bot, CronJob, Log, MCPServer, Message
+from app.models import Bot, CronJob, Log, MCPServer, Message, Ollama
 from app.utils import calculate_next_run_at, get_token_hash
 from clients import OllamaClient
 from clients.telegram import TelegramRateLimitError
@@ -16,18 +16,143 @@ from managers import OllamaConfigManager, TelegramClientManager
 from services.bot_processor import BotMessageProcessor
 from services.conversation_summary import ConversationSummaryService
 from services.embedding import EmbeddingService
-from services.log_formatter import LogFormatter
 from services.observed_patterns import ObservedPatternsService
 from services.telegram_update_handler import TelegramUpdateHandler
 from services.tool_executor import MCPToolsBuilder
-from strings import NO_BOT_RESPONSE, NO_OLLAMA, OBJ_NOT_FOUND
+from strings import (
+    BOT_CRON_JOB_SUCCESS,
+    BOT_MSG_SUCCESS,
+    GENERAL_TASK_ERROR,
+    GENERATE_EMBEDDING_SUCCESS,
+    INVALID_BOT_TOKEN,
+    NO_BOT_RESPONSE,
+    NO_OLLAMA,
+    OBJ_NOT_FOUND,
+    SUMMARY_PROCESS_SUCCESS,
+    TELEGRAM_RATE_LIMIT_ERROR,
+    UPDATE_OBSERVED_PATTERNS_SUCCESS,
+    WEBHOOK_SETUP_SUCCESS,
+)
 from whimsybots.celery import task as celery
 
 logger = logging.getLogger(__name__)
 
 
+"--------------------- HELPERS ----------------------------------"
+
+
+def get_ollama_cfg() -> Optional[Ollama]:
+    """Retrieve the Ollama configuration instance.
+
+    Fetches the active Ollama configuration from the config manager and returns it if available.
+    Logs a warning message if no Ollama configuration is found.
+
+    Returns:
+        The configured Ollama object, or None if not configured.
+
+    Raises:
+        No exception raised; logs warning instead when Ollama is unavailable.
+    """
+
+    ollama = OllamaConfigManager.get_ollama_config()
+    if ollama:
+        return ollama
+
+    logger.warning(NO_OLLAMA)
+
+
+def get_bot_obj(bot_id: str) -> Optional[Bot]:
+    """Retrieve a Bot instance by its ID.
+
+    Fetches the bot object from the database using the provided bot ID (UUID).
+    Handles the case where no bot exists with the given ID and logs an error message.
+
+    Args:
+        bot_id: The UUID string of the bot to retrieve.
+
+    Returns:
+        The Bot instance if found, or None if not found.
+
+    Raises:
+        No exception raised; logs error instead when bot is not found.
+    """
+
+    try:
+        bot = Bot.objects.get(id=bot_id)
+        return bot
+    except Bot.DoesNotExist:
+        logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot))
+
+
+def get_cron_obj(cron_job_id: str) -> Optional[CronJob]:
+    """Retrieve a CronJob instance by its ID.
+
+    Fetches the cron job object from the database using the provided cron job ID (UUID).
+    Handles the case where no cron job exists with the given ID and logs an error message.
+
+    Args:
+        cron_job_id: The UUID string of the cron job to retrieve.
+
+    Returns:
+        The CronJob instance if found, or None if not found.
+
+    Raises:
+        No exception raised; logs error instead when cron job is not found.
+    """
+
+    try:
+        cron_job = CronJob.objects.get(id=cron_job_id)
+        return cron_job
+    except CronJob.DoesNotExist:
+        logger.error(OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=cron_job_id))
+
+
+def get_msg_obj(msg_id: str) -> Optional[Message]:
+    """Retrieve a Message instance by its ID.
+
+    Fetches the message object from the database using the provided message ID (UUID).
+    Handles the case where no message exists with the given ID and logs an error message.
+
+    Args:
+        msg_id: The UUID string of the message to retrieve.
+
+    Returns:
+        The Message instance if found, or None if not found.
+
+    Raises:
+        No exception raised; logs error instead when message is not found.
+    """
+
+    try:
+        message = Message.objects.get(id=msg_id)
+        return message
+    except Message.DoesNotExist:
+        logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
+
+
+def create_log(bot: Bot, is_success: bool, desc: str) -> None:
+    """Create a new Log entry for the given bot.
+
+    Creates and saves a new log record associated with the specified bot, recording
+    whether an operation succeeded or failed along with a description of what occurred.
+
+    Args:
+        bot: The Bot instance to associate this log entry with.
+        is_success: Boolean indicating if the logged operation was successful (True) or failed (False).
+        desc: A string describing the action that was performed and its outcome.
+
+    Returns:
+        None; creates a new Log record in the database.
+    """
+
+    Log.objects.create(bot=bot, is_success=is_success, description=desc)
+
+
+"--------------------- TASKS ------------------------------------"
+
+
 @celery.task(bind=True, max_retries=3)
-def telegram_msg_handler(self, bot_token: str, update: dict):
+def telegram_msg_handler(self, bot_token: str, update: dict) -> None:
     """
     Fetch bot object from given bot token and processs the given update from telegram
     """
@@ -38,8 +163,7 @@ def telegram_msg_handler(self, bot_token: str, update: dict):
         bot = Bot.objects.get(telegram_bot_token_hash=bot_token_hash)
         TelegramUpdateHandler.handle_update(bot, update)
     except Bot.DoesNotExist:
-        logger.error(f"Bot with token {bot_token} not found")
-        return f"Bot with token {bot_token} not found"
+        logger.error(INVALID_BOT_TOKEN.format(bot_token=bot_token))
     except Exception as e:
         logger.error("Telegram poller failed", exc_info=True)
         # Retry after 60 seconds
@@ -47,7 +171,7 @@ def telegram_msg_handler(self, bot_token: str, update: dict):
 
 
 @celery.task(bind=True, max_retries=3)
-def cron_job_poller(self):
+def cron_job_poller(self) -> None:
     """
     Poll cron jobs for all the active bots that are due for execution and queue them for processing.
 
@@ -62,10 +186,9 @@ def cron_job_poller(self):
         current_dt = timezone.now()
 
         # Check if Ollama is configured
-        ollama = OllamaConfigManager.get_ollama_config()
+        ollama = get_ollama_cfg()
         if not ollama:
-            logger.warning(NO_OLLAMA)
-            return NO_OLLAMA
+            return
 
         # Find cron jobs due for execution
         due_jobs = CronJob.objects.filter(
@@ -85,9 +208,6 @@ def cron_job_poller(self):
                 eta=job.next_run_at,
             )
 
-        logger.info("Cron job poller completed successfully")
-        return "Processed due cron jobs successfully"
-
     except Exception as e:
         logger.error("Cron job poller failed", exc_info=True)
         # Retry after 60 seconds
@@ -95,7 +215,7 @@ def cron_job_poller(self):
 
 
 @celery.task(bind=True, max_retries=3)
-def setup_bot_webhook(self, bot_id: str):
+def setup_bot_webhook(self, bot_id: str) -> None:
     """
     Set up Telegram webhook for a bot.
 
@@ -113,8 +233,9 @@ def setup_bot_webhook(self, bot_id: str):
     """
 
     try:
-        # Fetch bot configuration
-        bot = Bot.objects.get(id=bot_id)
+        bot = get_bot_obj(bot_id=bot_id)
+        if not bot:
+            return
 
         if not bot.is_active:
             logger.info(f"Skipping webhook setup for inactive bot: {bot.name}")
@@ -133,19 +254,32 @@ def setup_bot_webhook(self, bot_id: str):
             url=webhook_url, allowed_updates=["message"]
         )
 
-        logger.info(f"Webhook setup successful for bot '{bot.name}': {response}")
-        return f"Webhook setup successful for bot '{bot.name}'"
+        log = WEBHOOK_SETUP_SUCCESS.format(bot_name=bot.name)
 
-    except Bot.DoesNotExist:
-        logger.error(f"Bot with ID {bot_id} not found")
-        return f"Bot with ID {bot_id} not found"
+        # Create Log
+        create_log(bot=bot, is_success=True, desc=log)
+
+        logger.info(f"{log}: {response}")
+
     except Exception as e:
         logger.error(f"Webhook setup failed for bot {bot_id}: {e}", exc_info=True)
+
+        # Create an error log
+        create_log(
+            bot=bot,
+            is_success=False,
+            desc=GENERAL_TASK_ERROR.format(
+                func_name="setup_bot_webhook",
+                bot_name=bot.name,
+                error=str(e),
+            ),
+        )
+
         raise self.retry(exc=e, countdown=60)
 
 
 @celery.task(bind=True, max_retries=3)
-def process_cron_job(self, job_id: str):
+def process_cron_job(self, job_id: str) -> None:
     """
     Process the given cron job and update its metadata after processing
 
@@ -160,17 +294,13 @@ def process_cron_job(self, job_id: str):
         Retries on failure with exponential backoff
     """
     try:
-        # Validate configuration
-        ollama = OllamaConfigManager.get_ollama_config()
+        ollama = get_ollama_cfg()
         if not ollama:
-            logger.error(NO_OLLAMA)
-            return NO_OLLAMA
+            return
 
-        try:
-            cron_job = CronJob.objects.get(id=job_id)
-        except CronJob.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=job_id))
-            return OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=job_id)
+        cron_job = get_cron_obj(cron_job_id=job_id)
+        if not cron_job:
+            return
 
         # Initialize clients and processor
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
@@ -200,55 +330,36 @@ def process_cron_job(self, job_id: str):
         cron_job.last_run_at = timezone.now()
         cron_job.save(update_fields=["next_run_at", "last_run_at"])
 
-        # Success Log
-        desc = (
-            LogFormatter("process_cron_job")
-            .add("bot", cron_job.bot.name)
-            .add("job", cron_job.name)
-            .add(
-                "ollama",
-                f"{ollama_ms}ms" if ollama_ms else None,
-            )
-            .build()
+        # Create a success log
+        create_log(
+            bot=cron_job.bot,
+            is_success=True,
+            desc=BOT_CRON_JOB_SUCCESS.format(bot_name=cron_job.bot.name),
         )
-        Log.objects.create(bot=cron_job.bot, is_success=True, description=desc)
-
-        logger.info(f"Cron job processing completed for bot: {cron_job.bot.name}")
-        return "Processed cron job successfully"
-
-    except TelegramRateLimitError as e:
-        if cron_job:
-            desc = (
-                LogFormatter("process_cron_job")
-                .add("bot", cron_job.bot.name)
-                .add("error", "TelegramRateLimitError")
-                .add("retry_after", f"{e.retry_after}s")
-                .build()
-            )
-            Log.objects.create(bot=cron_job.bot, is_success=False, description=desc)
-
-        logger.warning(
-            f"Telegram rate limit hit in process_cron_job, retrying in {e.retry_after}s"
-        )
-        raise self.retry(exc=e, countdown=e.retry_after)
 
     except Exception as e:
-        if cron_job:
-            desc = (
-                LogFormatter("process_cron_job")
-                .add("bot", cron_job.bot.name)
-                .add("error", type(e).__name__)
-                .build()
+        bot_name = cron_job.bot.name
+
+        if isinstance(e, TelegramRateLimitError):
+            desc = TELEGRAM_RATE_LIMIT_ERROR.format(
+                func_name="process_cron_job", bot_name=bot_name, error=str(e)
             )
-            Log.objects.create(bot=cron_job.bot, is_success=False, description=desc)
+            retry = e.retry_after
+        else:
+            desc = GENERAL_TASK_ERROR.format(
+                func_name="process_cron_job", bot_name=bot_name, error=str(e)
+            )
+            retry = 2**self.request.retries
+
+        # Create an error log
+        create_log(bot=cron_job.bot, is_success=False, desc=desc)
 
         logger.error("Failed to process cron job", exc_info=True)
-        # Retry with exponential backoff: 60s, 300s, 900s
-        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
+        raise self.retry(exc=e, countdown=60 * retry)
 
 
 @celery.task(bind=True, max_retries=3)
-def process_inbound_message(self, bot_id: str, msg_id: str):
+def process_inbound_message(self, bot_id: str, msg_id: str) -> None:
     """
     Process an inbound message through intent classification and tool execution.
 
@@ -265,25 +376,17 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
     """
 
     try:
-        # Validate configuration
-        ollama = OllamaConfigManager.get_ollama_config()
+        ollama = get_ollama_cfg()
         if not ollama:
-            logger.error(NO_OLLAMA)
-            return NO_OLLAMA
+            return
 
-        # Get bot
-        try:
-            bot = Bot.objects.get(id=bot_id)
-        except Bot.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot))
-            return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot)
+        bot = get_bot_obj(bot_id=bot_id)
+        if not bot:
+            return
 
-        # Get message
-        try:
-            message = Message.objects.get(id=msg_id)
-        except Message.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
-            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id)
+        message = get_msg_obj(msg_id=msg_id)
+        if not message:
+            return
 
         # Initialize clients and processor
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
@@ -315,55 +418,32 @@ def process_inbound_message(self, bot_id: str, msg_id: str):
             )
             logger.info("Pattern observation task queued")
 
-        # Success Log
-        desc = (
-            LogFormatter("process_inbound_message")
-            .add("bot", bot.name)
-            .add(
-                "ollama",
-                f"{ollama_ms}ms" if ollama_ms else None,
-            )
-            .build()
+        # Create a success log
+        create_log(
+            bot=bot, is_success=True, desc=BOT_MSG_SUCCESS.format(bot_name=bot.name)
         )
-        Log.objects.create(bot=bot, is_success=True, description=desc)
-
-        logger.info(f"Message processing completed for bot: {bot.name}")
-        return "Processed inbound message successfully"
-
-    except TelegramRateLimitError as e:
-        if bot:
-            desc = (
-                LogFormatter("process_inbound_message")
-                .add("bot", bot.name)
-                .add("error", "TelegramRateLimitError")
-                .add("retry_after", f"{e.retry_after}s")
-                .build()
-            )
-            Log.objects.create(bot=bot, is_success=False, description=desc)
-
-        logger.warning(
-            f"Telegram rate limit hit in process_inbound_message, "
-            f"retrying in {e.retry_after}s"
-        )
-        raise self.retry(exc=e, countdown=e.retry_after)
 
     except Exception as e:
-        if bot:
-            desc = (
-                LogFormatter("process_inbound_message")
-                .add("bot", bot.name)
-                .add("error", type(e).__name__)
-                .build()
+        if isinstance(e, TelegramRateLimitError):
+            desc = TELEGRAM_RATE_LIMIT_ERROR.format(
+                func_name="process_inbound_message", bot_name=bot.name, error=str(e)
             )
-            Log.objects.create(bot=bot, is_success=False, description=desc)
+            retry = e.retry_after
+        else:
+            desc = GENERAL_TASK_ERROR.format(
+                func_name="process_inbound_message", bot_name=bot.name, error=str(e)
+            )
+            retry = 2**self.request.retries
+
+        # Create an error log
+        create_log(bot=bot, is_success=False, desc=desc)
 
         logger.error("Failed to process inbound message", exc_info=True)
-        # Retry with exponential backoff: 60s, 300s, 900s
-        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
+        raise self.retry(exc=e, countdown=60 * retry)
 
 
 @celery.task(bind=True, max_retries=3)
-def manage_conversation_summary(self, bot_id: Optional[str] = None):
+def manage_conversation_summary(self, bot_id: Optional[str] = None) -> None:
     """
     Manage context window optimization for one or all active bots.
 
@@ -384,19 +464,18 @@ def manage_conversation_summary(self, bot_id: Optional[str] = None):
     """
 
     try:
-        ollama = OllamaConfigManager.get_ollama_config()
+        ollama = get_ollama_cfg()
         if not ollama:
-            logger.error(NO_OLLAMA)
-            return NO_OLLAMA
+            return
 
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
 
         if bot_id:
-            try:
-                bots = [Bot.objects.get(id=bot_id)]
-            except Bot.DoesNotExist:
-                logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
-                return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id)
+            bot = get_bot_obj(bot_id=bot_id)
+            if not bot:
+                return
+
+            bots = [Bot.objects.get(id=bot_id)]
         else:
             bots = list(Bot.objects.filter(is_active=True))
 
@@ -439,7 +518,7 @@ def manage_conversation_summary(self, bot_id: Optional[str] = None):
             Message.objects.bulk_update(summaries_to_update, ["content"])
             logger.info(f"Bulk updated {len(summaries_to_update)} summaries")
 
-        return f"Summary management completed for {len(bots)} bot(s)"
+        logger.info(SUMMARY_PROCESS_SUCCESS.format(bots_len=len(bots)))
 
     except Exception as e:
         logger.error("Failed to manage conversation summaries", exc_info=True)
@@ -457,17 +536,13 @@ def generate_embedding(self, message_id: str) -> None:
     """
 
     try:
-        ollama = OllamaConfigManager.get_ollama_config()
+        ollama = get_ollama_cfg()
         if not ollama:
-            logger.error(NO_OLLAMA)
-            return NO_OLLAMA
+            return
 
-        # Get message
-        try:
-            message = Message.objects.get(id=message_id)
-        except Message.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=message_id))
-            return OBJ_NOT_FOUND.format(obj_type="message", obj_id=message_id)
+        message = get_msg_obj(msg_id=message_id)
+        if not message:
+            return
 
         if message.role != MessageRole.USER.value[0]:
             logger.debug("Skipping embedding for non-user message %s", message_id)
@@ -482,12 +557,29 @@ def generate_embedding(self, message_id: str) -> None:
         embedding_svc = EmbeddingService(bot=message.bot, ollama=ollama)
         embedding_svc.save_message_embedding(message=message)
 
-    except Exception as exc:
-        logger.exception(
-            "generate_embedding failed for message %s: %s", message_id, exc
+        # Create a success log
+        create_log(
+            bot=message.bot,
+            is_success=True,
+            desc=GENERATE_EMBEDDING_SUCCESS.format(bot_name=message.bot.name),
         )
+
+    except Exception as e:
+        logger.error(
+            "generate_embedding failed for message %s", message_id, exc_info=True
+        )
+
+        # Create an error log
+        create_log(
+            bot=message.bot,
+            is_success=False,
+            desc=GENERAL_TASK_ERROR.format(
+                func_name="generate_embedding", bot_name=message.bot.name, error=str(e)
+            ),
+        )
+
         # Exponential backoff: 60s, 120s, 240s
-        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
+        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
 
 
 @celery.task(bind=True, max_retries=3)
@@ -500,23 +592,38 @@ def regenerate_observed_patterns(self, bot_id: str) -> None:
     """
 
     try:
-        ollama = OllamaConfigManager.get_ollama_config()
+        ollama = get_ollama_cfg()
         if not ollama:
-            logger.error(NO_OLLAMA)
-            return NO_OLLAMA
+            return
 
-        # Get bot
-        try:
-            bot = Bot.objects.get(id=bot_id)
-        except Bot.DoesNotExist:
-            logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
-            return OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id)
+        bot = get_bot_obj(bot_id=bot_id)
+        if not bot:
+            return
 
         pattern_svc = ObservedPatternsService(bot=bot, ollama=ollama)
         pattern_svc.regenerate()
 
-    except Exception as exc:
-        logger.exception(
-            "regenerate_observed_patterns failed for bot %s: %s", bot_id, exc
+        # Create a success log
+        create_log(
+            bot=bot,
+            is_success=True,
+            desc=UPDATE_OBSERVED_PATTERNS_SUCCESS.format(bot_name=bot.name),
         )
-        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
+
+    except Exception as e:
+        logger.exception(
+            "regenerate_observed_patterns failed for bot %s", bot_id, exc_info=True
+        )
+
+        # Create an error log
+        create_log(
+            bot=bot,
+            is_success=False,
+            desc=GENERAL_TASK_ERROR.format(
+                func_name="regenerate_observed_patterns",
+                bot_name=bot.name,
+                error=str(e),
+            ),
+        )
+
+        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
