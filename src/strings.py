@@ -10,8 +10,8 @@ NO_BOT_RESPONSE = "No response returned by the bot '{bot_name}'"
 SUMMARY_UNAVAILABLE = "Summary is not available, Please ignore."
 INVALID_BOT_TOKEN = "Bot with token '{bot_token}' not found."
 WEBHOOK_SETUP_SUCCESS = "Webhook setup successful for bot '{bot_name}'"
-BOT_CRON_JOB_SUCCESS = "Cron job processing completed for bot '{bot_name}'"
-BOT_MSG_SUCCESS = "Message processed successfully for bot '{bot_name}'"
+BOT_CRON_JOB_SUCCESS = "Cron job processing completed for bot '{bot_name}'\nOllama Response Duration: {duration}ms"
+BOT_MSG_SUCCESS = "Message processed successfully for bot '{bot_name}'\nOllama Response Duration: {duration}ms"
 TELEGRAM_RATE_LIMIT_ERROR = (
     "Telegram rate limit error in '{func_name}' for bot '{bot_name}'\n\nERROR: {error}"
 )
