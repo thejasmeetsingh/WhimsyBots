@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.db.models import Count, Q, Subquery, OuterRef
 
 from app.choices import MessageRole
 from app.forms import BotForm, MCPServerForm
@@ -130,6 +131,36 @@ class BotAdmin(admin.ModelAdmin):
             .get_queryset(request)
             .filter(created_by_id=request.user.id)
             .select_related("created_by")
+            .prefetch_related("bot_logs")
+            .annotate(
+                # Stats
+                messages_count=Count("messages"),
+                mcp_active_count=Count(
+                    "mcp_servers", filter=Q(mcp_servers__is_active=True)
+                ),
+                mcp_inactive_count=Count(
+                    "mcp_servers", filter=Q(mcp_servers__is_active=False)
+                ),
+                cron_active_count=Count(
+                    "bot_cron_jobs", filter=Q(bot_cron_jobs__is_active=True)
+                ),
+                cron_inactive_count=Count(
+                    "bot_cron_jobs", filter=Q(bot_cron_jobs__is_active=False)
+                ),
+                logs_success_count=Count(
+                    "bot_logs", filter=Q(bot_logs__is_success=True)
+                ),
+                logs_error_count=Count(
+                    "bot_logs", filter=Q(bot_logs__is_success=False)
+                ),
+                # Latest log data
+                last_log_id=Subquery(
+                    Log.objects.filter(bot=OuterRef("id")).values("id")[:1]
+                ),
+                last_log_success=Subquery(
+                    Log.objects.filter(bot=OuterRef("id")).values("is_success")[:1]
+                ),
+            )
         )
 
     def _render_stats_table(self, obj):
@@ -147,19 +178,19 @@ class BotAdmin(admin.ModelAdmin):
             return "-"
 
         # Messages
-        msgs_count = obj.messages.count()
+        msgs_count = getattr(obj, "messages_count", 0)
 
         # MCP Servers
-        mcps_active = obj.mcp_servers.filter(is_active=True).count()
-        mcps_inactive = obj.mcp_servers.filter(is_active=False).count()
+        mcps_active = getattr(obj, "mcp_active_count", 0)
+        mcps_inactive = getattr(obj, "mcp_inactive_count", 0)
 
         # Cron Jobs
-        active_crons = obj.bot_cron_jobs.filter(is_active=True).count()
-        inactive_crons = obj.bot_cron_jobs.filter(is_active=False).count()
+        active_crons = getattr(obj, "cron_active_count", 0)
+        inactive_crons = getattr(obj, "cron_inactive_count", 0)
 
         # Logs
-        successes = obj.bot_logs.filter(is_success=True).count()
-        errors = obj.bot_logs.filter(is_success=False).count()
+        successes = getattr(obj, "logs_success_count", 0)
+        errors = getattr(obj, "logs_error_count", 0)
 
         return f"""
             <table cellpadding="10" cellspacing="10" style="text-align: center; border: 2px solid #ccc;">
@@ -204,20 +235,16 @@ class BotAdmin(admin.ModelAdmin):
     def last_execution_status(self, obj=None):
         """Display the last execution status with appropriate icon and link."""
 
-        if not obj:
+        if not obj or not hasattr(obj, "last_log_id") or not obj.last_log_id:
             return "-"
 
-        last_log = obj.bot_logs.first()
-        if not last_log:
-            return "-"
-
-        if last_log.is_success:
+        if obj.last_log_success:
             return format_html(
                 "<img src='/static/admin/img/icon-yes.svg' alt='Success'>"
             )
 
         return format_html(
-            f"<a href='/admin/app/log/{str(last_log.id)}' target='_blank'>"
+            f"<a href='/admin/app/log/{obj.last_log_id}' target='_blank'>"
             f"<img src='/static/admin/img/icon-no.svg' alt='Failed'> View More</a>"
         )
 
