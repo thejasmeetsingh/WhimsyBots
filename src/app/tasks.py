@@ -1,11 +1,11 @@
 """Celery task definitions for async job processing"""
 
-import asyncio
 import logging
 from typing import Optional
 
 from django.conf import settings
 from django.utils import timezone
+from django.db.models import Prefetch
 
 from app.choices import MessageRole
 from app.models import Bot, CronJob, Log, MCPServer, Message, Ollama
@@ -18,7 +18,6 @@ from services.conversation_summary import ConversationSummaryService
 from services.embedding import EmbeddingService
 from services.observed_patterns import ObservedPatternsService
 from services.telegram_update_handler import TelegramUpdateHandler
-from services.tool_executor import MCPToolsBuilder
 from strings import (
     BOT_CRON_JOB_SUCCESS,
     BOT_MSG_SUCCESS,
@@ -334,7 +333,9 @@ def process_cron_job(self, job_id: str) -> None:
         create_log(
             bot=cron_job.bot,
             is_success=True,
-            desc=BOT_CRON_JOB_SUCCESS.format(bot_name=cron_job.bot.name),
+            desc=BOT_CRON_JOB_SUCCESS.format(
+                bot_name=cron_job.bot.name, duration=ollama_ms
+            ),
         )
 
     except Exception as e:
@@ -420,7 +421,9 @@ def process_inbound_message(self, bot_id: str, msg_id: str) -> None:
 
         # Create a success log
         create_log(
-            bot=bot, is_success=True, desc=BOT_MSG_SUCCESS.format(bot_name=bot.name)
+            bot=bot,
+            is_success=True,
+            desc=BOT_MSG_SUCCESS.format(bot_name=bot.name, duration=ollama_ms),
         )
 
     except Exception as e:
@@ -470,44 +473,52 @@ def manage_conversation_summary(self, bot_id: Optional[str] = None) -> None:
 
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
 
-        if bot_id:
-            bot = get_bot_obj(bot_id=bot_id)
-            if not bot:
-                return
+        # Adjust filter based on bot_id parameter
+        filters = {"id": bot_id} if bot_id else {"is_active": True}
 
-            bots = [Bot.objects.get(id=bot_id)]
-        else:
-            bots = list(Bot.objects.filter(is_active=True))
+        # Fetch bots with messages
+        bots = Bot.objects.filter(**filters).prefetch_related(
+            Prefetch(
+                lookup="messages",
+                queryset=Message.objects.filter(
+                    role__in=[
+                        MessageRole.USER.value[0],
+                        MessageRole.ASSISTANT.value[0],
+                    ]
+                ),
+                to_attr="conversations",
+            ),
+            Prefetch(
+                lookup="messages",
+                queryset=Message.objects.filter(role=MessageRole.SYSTEM.value[0]),
+                to_attr="system_messages",
+            ),
+            Prefetch(
+                lookup="mcp_servers",
+                queryset=MCPServer.objects.filter(is_active=True),
+                to_attr="mcp_servers_list",
+            ),
+        )
 
         summaries_to_update = []
         summaries_to_create = []
 
-        # Build tools from servers
-        mcp_servers = list(MCPServer.objects.filter(bot_id=bot_id, is_active=True))
-
-        # Add default mcp server's to the 'mcp_servers' list
-        default_servers = MCPServer.get_default_mcp_servers()
-        mcp_servers.extend(list(default_servers.values()))
-
-        tools_config = asyncio.run(
-            MCPToolsBuilder.build_tools_from_servers(mcp_servers)
-        )
-
         for bot in bots:
-            service = ConversationSummaryService(
-                bot,
-                ollama,
-                ollama_client,
-                tool_definitions=[tool.tool for tool in tools_config],
-            )
-            result = service.process()
+            # Only create summary if there is conversation records
+            if hasattr(bot, "conversations") and bot.conversations:
+                service = ConversationSummaryService(
+                    bot,
+                    ollama,
+                    ollama_client,
+                )
+                result = service.process()
 
-            if result:
-                summary_msg, created = result
-                if created:
-                    summaries_to_create.append(summary_msg)
-                else:
-                    summaries_to_update.append(summary_msg)
+                if result:
+                    summary_msg, created = result
+                    if created:
+                        summaries_to_create.append(summary_msg)
+                    else:
+                        summaries_to_update.append(summary_msg)
 
         # Batch DB writes to minimize query count
         if summaries_to_create:
@@ -518,7 +529,7 @@ def manage_conversation_summary(self, bot_id: Optional[str] = None) -> None:
             Message.objects.bulk_update(summaries_to_update, ["content"])
             logger.info(f"Bulk updated {len(summaries_to_update)} summaries")
 
-        logger.info(SUMMARY_PROCESS_SUCCESS.format(bots_len=len(bots)))
+        logger.info(SUMMARY_PROCESS_SUCCESS.format(bots_len=bots.count()))
 
     except Exception as e:
         logger.error("Failed to manage conversation summaries", exc_info=True)
