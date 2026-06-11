@@ -77,10 +77,12 @@ class ContextAssembler:
         # Fetch messages
         messages = Message.objects.filter(bot_id=self.bot.id)
 
+        # Filter only conversational messages using the same messages QuerySet
         conversations = messages.filter(
             role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
         )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
 
+        # Retreive summary (if available) using the same messages QuerySet
         summary = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
         summary_msg = summary.content if summary else SUMMARY_UNAVAILABLE
 
