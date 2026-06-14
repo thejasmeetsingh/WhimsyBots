@@ -11,17 +11,19 @@ This module provides helper functions for:
 import base64
 import hashlib
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from croniter import croniter
 from cryptography.fernet import Fernet
 from django.conf import settings
 from django.utils import timezone
 
+from app.models import Message, MCPServer, Log
+
 logger = logging.getLogger(__name__)
 
 
-def calculate_next_run_at(cron_expression: Optional[str]) -> timezone.datetime:
+def calculate_next_run_at(cron_expression: str) -> timezone.datetime:
     """
     Calculate the next scheduled run time for a cron job.
 
@@ -39,7 +41,7 @@ def calculate_next_run_at(cron_expression: Optional[str]) -> timezone.datetime:
     return croniter(cron_expression, current_dt).get_next(timezone.datetime)
 
 
-def get_admin_link(model: str, value: int, obj) -> str:
+def get_admin_link(model: str, value: int, obj: type[Message | MCPServer | Log]) -> str:
     """
     Generate an HTML link for admin filtering in Django admin.
 
@@ -60,7 +62,7 @@ def get_admin_link(model: str, value: int, obj) -> str:
     """
 
     if not obj or not value:
-        return value
+        return "0"
     return f"<a href='/admin/app/{model}/?bot_id={str(obj.id)}' target='_blank'>{value}</a>"
 
 
@@ -90,7 +92,7 @@ def split_message(text: str, limit: int = 4096) -> List[str]:
     if len(text) <= limit:
         return [text]
 
-    chunks = []
+    chunks: list[str] = []
     # Tracks the opening line of an unclosed code fence e.g. "```python"
     # so we can re-open it at the start of the next chunk if needed.
     open_fence: str | None = None
@@ -228,7 +230,7 @@ def _needs_fence_prefix(chunk_text: str, open_fence: str) -> bool:
     return not chunk_text.lstrip().startswith(open_fence)
 
 
-def parse_telegram_update(update: Dict) -> Optional[Dict[str, str]]:
+def parse_telegram_update(update: dict[str, Any]) -> Optional[Dict[str, str]]:
     """
     Parse a Telegram webhook update into a standardized format.
 
@@ -270,7 +272,7 @@ def parse_telegram_update(update: Dict) -> Optional[Dict[str, str]]:
 
 
 def convert_messages_to_ollama_format(
-    messages, system_prompt: Optional[str] = None
+    messages: list[Message], system_prompt: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """
     Convert Message model instances to Ollama API message format.
@@ -296,7 +298,7 @@ def convert_messages_to_ollama_format(
         "A": "assistant",
     }
 
-    ollama_messages = []
+    ollama_messages: list[dict[str, str]] = []
 
     if system_prompt:
         ollama_messages.append({"role": "system", "content": system_prompt})
