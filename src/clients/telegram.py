@@ -7,7 +7,7 @@ Handles message sending, file uploads, user actions, and webhook updates.
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Any, List, Optional
 
 import redis
 import requests
@@ -64,14 +64,11 @@ class TelegramClient:
         >>> client.send_typing_action()
     """
 
-    base_url: str = None
-    chat_id: str = None
-
     # Max attempts for the inline rate limit retry loop in send_message/send_document.
     _RATE_LIMIT_RETRIES = 3
     _RATE_LIMIT_WAIT = 1  # seconds to wait between retries when throttled locally
 
-    def __init__(self, token: str, chat_id: str = None):
+    def __init__(self, token: str, chat_id: Optional[str] = None):
         """
         Initialize Telegram client.
 
@@ -97,7 +94,7 @@ class TelegramClient:
         self._redis = redis.from_url(settings.CELERY_BROKER_URL)
         self._rate_limiter = RateLimiter(self._redis, token)
 
-    def _post(self, endpoint: str, payload: Dict) -> Dict:
+    def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         """
         Make authenticated POST request to Telegram API.
 
@@ -158,7 +155,7 @@ class TelegramClient:
         # on Telegram's 429 + task retry as the hard backstop.
         logger.warning("Rate limiter exhausted retries — proceeding anyway")
 
-    def send_message(self, text: str, parse_mode: str = "Markdown") -> Dict:
+    def send_message(self, text: str, parse_mode: str = "Markdown") -> dict[str, Any]:
         """
         Send a text message to the chat.
 
@@ -232,7 +229,7 @@ class TelegramClient:
 
         return result
 
-    def send_typing_action(self) -> Dict:
+    def send_typing_action(self) -> dict[str, Any]:
         """
         Show 'typing...' indicator in chat.
 
@@ -257,7 +254,7 @@ class TelegramClient:
 
     def set_webhook(
         self, url: str, allowed_updates: Optional[List[str]] = None
-    ) -> Dict:
+    ) -> dict[str, Any]:
         """
         Set a webhook for the bot to receive updates.
 
@@ -295,9 +292,7 @@ class TelegramClient:
             - Use delete_webhook() to remove webhook and switch back to polling
         """
 
-        payload = {
-            "url": url,
-        }
+        payload: dict[str, str | list[str]] = {"url": url}
 
         if allowed_updates is not None:
             payload["allowed_updates"] = allowed_updates
