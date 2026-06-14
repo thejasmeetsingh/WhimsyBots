@@ -16,7 +16,7 @@ the system prompt), with oldest messages dropped first when budget is tight.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from django.conf import settings
 from pydantic import BaseModel
@@ -41,7 +41,7 @@ RECENT_MESSAGES_CAP: int = 200
 
 class AssembledContext(BaseModel):
     history: list[
-        dict
+        dict[str, str]
     ]  # Ollama-formatted message dicts [{"role": ..., "content": ...}]
     budget: TokenBudget  # Carried through for logging / debugging
 
@@ -63,7 +63,7 @@ class ContextAssembler:
 
     def assemble(
         self,
-        tool_definitions: list[dict],
+        tool_definitions: list[dict[str, Any]],
         active_mcp_server_names: list[str],
     ) -> AssembledContext:
         """
@@ -125,7 +125,7 @@ class ContextAssembler:
         )
 
         # 3. Assemble system prompt
-        sections = []
+        sections: list[str] = []
 
         if fitted_system_prompt:
             sections.append(fitted_system_prompt)
@@ -142,7 +142,7 @@ class ContextAssembler:
         system_prompt = SECTION_SEP.join(sections)
 
         # 4. Fit conversation history
-        history = self._fit_history(
+        history: list[dict[str, str]] = self._fit_history(
             budget, messages=conversations, system_prompt=system_prompt
         )
 
@@ -171,7 +171,7 @@ class ContextAssembler:
     def _fit_memories(
         self,
         budget: TokenBudget,
-        top_k: Optional[int] = 5,
+        top_k: int = 5,
     ) -> str:
         """
         Retrieve top-k semantically similar past USER messages, then drop
@@ -215,7 +215,7 @@ class ContextAssembler:
         budget: TokenBudget,
         messages: list[Message],
         system_prompt: Optional[str] = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, str]]:
         """
         Walk newest→oldest for the given messages, keep until history_tokens budget is exhausted.
         Returns Ollama-formatted dicts in chronological order.

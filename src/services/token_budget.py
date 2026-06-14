@@ -16,10 +16,11 @@ This intentionally under-budgets slightly, giving a safe headroom.
 
 import json
 import logging
+from typing import Any
 
 from pydantic import BaseModel
 
-from app.models import Ollama
+from app.models import Message, Ollama
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class TokenBudgetService:
     def compute(
         cls,
         ollama_config: "Ollama",
-        tool_definitions: list[dict],
+        tool_definitions: list[dict[str, Any]],
     ) -> TokenBudget:
         """
         Steps:
@@ -209,9 +210,9 @@ class TokenBudgetService:
 
     @staticmethod
     def fit_messages_to_token_budget(
-        messages: list,  # list of Message ORM objects, newest-first
+        messages: list[Message],  # list of Message ORM objects, newest-first
         token_budget: int,
-    ) -> list:
+    ) -> list[Message]:
         """
         Walk backwards through messages (newest → oldest), accumulating
         token cost until the budget is exhausted. Returns the kept subset
@@ -220,7 +221,7 @@ class TokenBudgetService:
         This is the "drop oldest first" strategy for history.
         """
 
-        kept = []
+        kept: list[Message] = []
         tokens_used = 0
 
         for msg in messages:  # already sorted newest-first by caller
@@ -235,16 +236,18 @@ class TokenBudgetService:
 
     @staticmethod
     def fit_embeddings_to_char_budget(
-        memories: list,  # list of (Message, similarity_score), highest score first
+        memories: list[
+            tuple[Message, float]
+        ],  # list of (Message, similarity_score), highest score first
         char_budget: int,
-    ) -> list:
+    ) -> list[tuple[Message, float]]:
         """
         Include embeddings from highest similarity downward until char_budget
         is exhausted. Lowest-similarity results are dropped first naturally
         since they appear at the end of the ranked list.
         """
 
-        kept = []
+        kept: list[tuple[Message, float]] = []
         chars_used = 0
 
         for msg, score in memories:
@@ -269,7 +272,7 @@ class TokenBudgetService:
         return response[: char_budget - len(note)] + note
 
     @classmethod
-    def _measure_tool_def_tokens(cls, tool_definitions: list[dict]) -> int:
+    def _measure_tool_def_tokens(cls, tool_definitions: list[dict[str, Any]]) -> int:
         """
         Measures the actual serialized token cost of tool definitions
         rather than estimating. Uses a tighter chars/token ratio for JSON
