@@ -43,7 +43,7 @@ class SkillsRegistry:
             timezone: App's default timezone will be used as a context in the default Time MCP server
         """
 
-        matched = []
+        matched: list[str] = []
 
         for name in server_names:
             skill = SKILLS.get(name)

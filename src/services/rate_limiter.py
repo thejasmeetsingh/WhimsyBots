@@ -1,3 +1,6 @@
+from redis import Redis
+
+
 class RateLimiter:
     """
     Redis-backed sliding window rate limiter.
@@ -20,7 +23,7 @@ class RateLimiter:
     WINDOW_SECONDS = 1
     MAX_REQUESTS = 1  # Telegram limit: 1 msg/sec per chat
 
-    def __init__(self, redis_client, bot_token: str):
+    def __init__(self, redis_client: Redis, bot_token: str):
         self.redis = redis_client
         self.key = f"{self.KEY_PREFIX}:{bot_token}"
 
