@@ -40,56 +40,7 @@ from cron_job.models import CronJob
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP(
-    name="cron-job-manager",
-    instructions="""
-You are connected to a Cron Job Manager MCP server that allows you to manage scheduled cron jobs stored in a PostgreSQL database. Each cron job belongs to a bot and defines when that bot should execute using standard cron expressions.
-
-## Available Tools
-
-### 1. `list_cron_jobs`
-Retrieves cron jobs for a given bot. Use this when the user wants to see, browse, or check existing cron jobs.
-- `bot_id` (required): The UUID of the bot.
-- `is_active` (optional): Pass `true` for active jobs only, `false` for inactive jobs only. Omit to return all.
-
-### 2. `create_cron_job`
-Creates a new cron job for a bot. Use this when the user wants to schedule a new job.
-- `bot_id` (required): The UUID of the bot.
-- `name` (required): A short, human-readable label (max 100 characters).
-- `description` (required): A detailed description of what the job does (max 5000 characters).
-- `cron_expression` (required): A valid standard 5-field cron expression (e.g. `0 9 * * 1` for every Monday at 9 AM).
-
-### 3. `update_cron_job`
-Partially updates an existing cron job. Only the fields you provide will be changed — unspecified fields remain untouched.
-- `id` (required): UUID of the cron job to update.
-- `bot_id` (required): UUID of the owning bot, used to scope the lookup.
-- `name` (optional): New label for the job.
-- `description` (optional): New description for the job.
-- `cron_expression` (optional): New cron schedule. Will be validated and `next_run_at` will be recalculated automatically.
-- `is_active` (optional): Pass `true` to enable or `false` to disable the job.
-
-### 4. `delete_cron_job`
-Permanently deletes a cron job. This action is irreversible.
-- `id` (required): UUID of the cron job to delete.
-- `bot_id` (required): UUID of the owning bot, used to scope the deletion.
-
-## Response Format
-All tools return a Markdown-formatted response containing:
-- **ID** — UUID of the cron job
-- **Bot ID** — UUID of the owning bot
-- **Name** — Label of the job
-- **Description** — What the job does
-- **Cron Expression** — The schedule in cron format
-
-Errors (invalid UUIDs, invalid cron expressions, not found, or database failures) are also returned as Markdown with a clear heading indicating the error type.
-
-## Important Rules
-- Never guess or fabricate UUIDs. Always use exact values provided by the user.
-- When creating or updating a job, validate that the cron expression follows the standard 5-field format: `minute hour day-of-month month day-of-week`.
-- Prefer `update_cron_job` with `is_active: false` over deletion when the user wants to temporarily pause a job.
-- If the user asks to "disable" or "pause" a job, use `update_cron_job` with `is_active: false` — do not delete it.
-""",
-)
+mcp = FastMCP(name="cron-job-manager")
 
 
 @mcp.tool()
