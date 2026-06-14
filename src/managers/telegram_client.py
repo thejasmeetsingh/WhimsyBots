@@ -1,11 +1,13 @@
 """Telegram client manager"""
 
+from app.models import Bot
+
 
 class TelegramClientManager:
     """Manages Telegram client instantiation"""
 
     @staticmethod
-    def create_client(bot):
+    def create_client(bot: Bot):
         """
         Create a TelegramClient for the given bot.
 
