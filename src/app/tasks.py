@@ -80,7 +80,7 @@ def get_bot_obj(bot_id: str) -> Optional[Bot]:
         bot = Bot.objects.get(id=bot_id)
         return bot
     except Bot.DoesNotExist:
-        logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot))
+        logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
 
 
 def get_cron_obj(cron_job_id: str) -> Optional[CronJob]:
