@@ -29,8 +29,13 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from cron_job.db import get_session
-from cron_job.helpers import (_calc_next_run, _fmt_job, _fmt_jobs, _parse_uuid,
-                              _validate_cron)
+from cron_job.helpers import (
+    calc_next_run,
+    fmt_job,
+    fmt_jobs,
+    parse_uuid,
+    validate_cron,
+)
 from cron_job.models import CronJob
 
 logger = logging.getLogger(__name__)
@@ -130,7 +135,7 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
         }
     )
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
@@ -146,7 +151,7 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
             jobs = result.scalars().all()
 
         status_label = {True: "Active", False: "Inactive", None: "All"}[is_active]
-        return _fmt_jobs(jobs, f"Cron Jobs — Bot `{bot_id}` ({status_label})")
+        return fmt_jobs(jobs, f"Cron Jobs — Bot `{bot_id}` ({status_label})")
     except SQLAlchemyError as e:
         return f"## Database Error\n\n```\n{e}\n```"
 
@@ -200,13 +205,13 @@ async def create_cron_job(
         }
     )
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     try:
-        _validate_cron(cron_expression)
+        validate_cron(cron_expression)
     except ValueError as e:
         return f"## Validation Error\n\n{e}"
 
@@ -218,14 +223,14 @@ async def create_cron_job(
                 name=name,
                 description=description,
                 cron_expression=cron_expression,
-                next_run_at=_calc_next_run(cron_expression),
+                next_run_at=calc_next_run(cron_expression),
                 is_active=True,
             )
             session.add(job)
             await session.commit()
             await session.refresh(job)
 
-        return "## ✅ Cron Job Created\n\n" + _fmt_job(job)
+        return "## ✅ Cron Job Created\n\n" + fmt_job(job)
     except SQLAlchemyError as e:
         return f"## Database Error\n\n```\n{e}\n```"
 
@@ -292,19 +297,19 @@ async def update_cron_job(
         }
     )
 
-    job_uuid = _parse_uuid(id, "id")
+    job_uuid = parse_uuid(id, "id")
     if isinstance(job_uuid, str):
         logger.error("Invalid 'job_uuid' format")
         return job_uuid
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     if cron_expression is not None:
         try:
-            _validate_cron(cron_expression)
+            validate_cron(cron_expression)
         except ValueError as e:
             return f"## Validation Error\n\n{e}"
 
@@ -318,7 +323,7 @@ async def update_cron_job(
         changes["is_active"] = is_active
     if cron_expression is not None:
         changes["cron_expression"] = cron_expression
-        changes["next_run_at"] = _calc_next_run(cron_expression)
+        changes["next_run_at"] = calc_next_run(cron_expression)
 
     try:
         async with get_session() as session:
@@ -342,7 +347,7 @@ async def update_cron_job(
             await session.commit()
             await session.refresh(job)
 
-        return "## ✅ Cron Job Updated\n\n" + _fmt_job(job)
+        return "## ✅ Cron Job Updated\n\n" + fmt_job(job)
     except SQLAlchemyError as e:
         return f"## Database Error\n\n```\n{e}\n```"
 
@@ -386,12 +391,12 @@ async def delete_cron_job(id: str, bot_id: str) -> str:
         }
     )
 
-    job_uuid = _parse_uuid(id, "id")
+    job_uuid = parse_uuid(id, "id")
     if isinstance(job_uuid, str):
         logger.error("Invalid 'job_uuid' format")
         return job_uuid
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
@@ -409,7 +414,7 @@ async def delete_cron_job(id: str, bot_id: str) -> str:
             if job is None:
                 return f"## Not Found\n\nNo cron job with ID `{id}` found for bot `{bot_id}`."
 
-            snapshot_md = _fmt_job(job)  # capture before delete
+            snapshot_md = fmt_job(job)  # capture before delete
             await session.delete(job)
             await session.commit()
 

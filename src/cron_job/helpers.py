@@ -8,7 +8,7 @@ from croniter import croniter
 from cron_job.models import CronJob
 
 
-def _validate_cron(expr: str) -> None:
+def validate_cron(expr: str) -> None:
     """
     Validate a cron expression.
 
@@ -23,7 +23,7 @@ def _validate_cron(expr: str) -> None:
         raise ValueError(f"Invalid cron expression: '{expr}'")
 
 
-def _calc_next_run(expr: str) -> datetime:
+def calc_next_run(expr: str) -> datetime:
     """
     Calculate the next execution time for a cron expression.
 
@@ -37,7 +37,7 @@ def _calc_next_run(expr: str) -> datetime:
     return croniter(expr, datetime.now(timezone.utc)).get_next(datetime)
 
 
-def _parse_uuid(value: str, label: str) -> uuid.UUID | str:
+def parse_uuid(value: str, label: str) -> uuid.UUID | str:
     """
     Return a UUID object or an error string.
 
@@ -56,7 +56,7 @@ def _parse_uuid(value: str, label: str) -> uuid.UUID | str:
         return f"## Error\n\n`{label}` is not a valid UUID: `{value}`"
 
 
-def _fmt_job(job: CronJob) -> str:
+def fmt_job(job: CronJob) -> str:
     """
     Format a single CronJob object as a Markdown list item.
 
@@ -76,7 +76,7 @@ def _fmt_job(job: CronJob) -> str:
     )
 
 
-def _fmt_jobs(jobs: list[CronJob], heading: str) -> str:
+def fmt_jobs(jobs: list[CronJob], heading: str) -> str:
     """
     Format a list of CronJob objects as a Markdown report.
 
@@ -91,5 +91,5 @@ def _fmt_jobs(jobs: list[CronJob], heading: str) -> str:
     if not jobs:
         return f"## {heading}\n\n_No cron jobs found._"
     lines = [f"## {heading}\n", f"**Total**: {len(jobs)}\n"]
-    lines += [_fmt_job(j) for j in jobs]
+    lines += [fmt_job(j) for j in jobs]
     return "\n".join(lines)
