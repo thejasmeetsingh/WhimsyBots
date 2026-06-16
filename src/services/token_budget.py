@@ -2,12 +2,11 @@
 Token Budget Service — treats the context window like OS RAM.
 
 Priority (most protected → truncated first):
-  1. Skills         — static, always fits, never touched
-  2. Patterns       — protected, capped at 4096 chars by design
-  3. System prompt  — truncate from bottom if tight
-  4. History        — drop oldest messages first
-  5. Embeddings     — drop lowest-similarity results first
-  6. Tool responses — truncated most aggressively (verbose, LLM-generated)
+  1. Patterns       — protected, capped at 4096 chars by design
+  2. System prompt  — truncate from bottom if tight (includes skills block inline)
+  3. History        — drop oldest messages first
+  4. Embeddings     — drop lowest-similarity results first
+  5. Tool responses — truncated most aggressively (verbose, LLM-generated)
 
 All values are in CHARS. We never have an exact tokenizer for arbitrary
 Ollama models, so we use a conservative 3.5 chars/token estimate.
@@ -40,13 +39,15 @@ TOOL_SAFETY_BUFFER_TOKENS: int = 50
 # that are always present regardless of context. Measured conservatively.
 FIXED_OVERHEAD_TOKENS: int = 200
 
-# Skills are static and author-controlled. We carve this out first so they
-# never compete with dynamic sources. Keep skill descriptions under this.
-SKILLS_RESERVED_TOKENS: int = 250  # ~875 chars
-
 # How many tokens to reserve for the LLM's own output when num_predict is
 # not explicitly set on the Ollama config.
 DEFAULT_OUTPUT_RESERVATION_TOKENS: int = 512
+
+# Average token cost of a single MCP tool definition (schema + description).
+# Used to derive the maximum recommended tool count from the available budget.
+# We measure actual cost where possible, but this is the floor estimate used
+# for capacity planning against num_ctx.
+TOOL_DEF_AVG_TOKENS: int = 150
 
 # Allocation ratios applied to the remaining usable budget after all
 # fixed reservations are carved out. Must sum to 1.0.
@@ -55,11 +56,13 @@ DEFAULT_OUTPUT_RESERVATION_TOKENS: int = 512
 #   Tier 1 (equal) — history + embeddings: the model's primary context
 #   Tier 2         — tool_responses: the model's only window into live data
 #   Tier 3         — system_prompt + patterns + summary: important but bounded by design
+# Skills are now inlined into the system prompt, so the 5% previously carved
+# out for SKILLS_RESERVED_TOKENS is folded back into system_prompt.
 ALLOCATION_RATIOS: dict[str, float] = {
     "history": 0.30,  # 30% — recency context, Tier 1
-    "embeddings": 0.30,  # 30% — semantic memory, Tier 1 (equal to history)
+    "embeddings": 0.25,  # 25% — semantic memory, Tier 1 (equal to history)
     "tool_responses": 0.25,  # 25% — live data from MCP tools, Tier 2
-    "system_prompt": 0.05,  # 5% — user-authored prompt, Tier 3
+    "system_prompt": 0.10,  # 10% — user-authored prompt + inline skills, Tier 3
     "patterns": 0.05,  # 5%  — behavioral profile, Tier 3
     "summary": 0.05,  # 5%  — past conversation summary, Tier 3
 }
@@ -73,10 +76,10 @@ class TokenBudget(BaseModel):
     output_reservation: int
     tool_def_tokens: int
     fixed_overhead_tokens: int
-    skills_tokens: int
 
     # Derived
     usable_tokens: int
+    recommended_tool_count: int  # max tools we can fit given num_ctx + allocations
 
     # Allocations — ordered by priority tier
     # Tier 1: primary context (equal weight)
@@ -104,6 +107,7 @@ class TokenBudget(BaseModel):
                 "embedding_chars": self.embedding_chars,
                 "history_tokens": self.history_tokens,
                 "tool_response_chars": self.tool_response_chars,
+                "recommended_tool_count": self.recommended_tool_count,
             }
         )
 
@@ -129,7 +133,7 @@ class TokenBudgetService:
           2. Subtract output reservation (num_predict or default)
           3. Subtract estimated tool definition tokens (MCP tools are verbose JSON)
           4. Subtract fixed overhead (StructuredOutput schema + base instructions)
-          5. Subtract skills reservation (always protected, carved out first)
+          5. Compute recommended_tool_count from num_ctx + existing allocations
           6. Split remainder across system_prompt / patterns / embeddings / history / tool_responses
         """
 
@@ -148,27 +152,32 @@ class TokenBudgetService:
         # are never underestimated and never enter the truncation pool.
         tool_def_tokens = cls._measure_tool_def_tokens(tool_definitions)
 
-        # --- Step 4 & 5: Fixed carve-outs ---
-        total_reserved = (
-            output_reservation
-            + tool_def_tokens
-            + FIXED_OVERHEAD_TOKENS
-            + SKILLS_RESERVED_TOKENS
-        )
+        # --- Step 4: Fixed carve-outs ---
+        total_reserved = output_reservation + tool_def_tokens + FIXED_OVERHEAD_TOKENS
 
         usable_tokens = max(num_ctx - total_reserved, 0)
 
         if usable_tokens == 0:
             logger.warning(
                 "TokenBudget: usable_tokens=0 after reservations "
-                "(num_ctx=%d, output=%d, tool_defs=%d, overhead=%d, skills=%d). "
+                "(num_ctx=%d, output=%d, tool_defs=%d, overhead=%d). "
                 "Increase num_ctx in the admin panel or reduce connected MCP tools.",
                 num_ctx,
                 output_reservation,
                 tool_def_tokens,
                 FIXED_OVERHEAD_TOKENS,
-                SKILLS_RESERVED_TOKENS,
             )
+
+        # --- Step 5: Recommended tool count ---
+        # The headroom left after every other reservation tells us how many
+        # more tool definitions we *could* fit. Floor at the number of tools
+        # we already measured (we can never recommend fewer than are in use).
+        recommended_tool_count = cls._recommend_tool_count(
+            num_ctx=num_ctx,
+            output_reservation=output_reservation,
+            already_measured_tool_def_tokens=tool_def_tokens,
+            tool_definitions=tool_definitions,
+        )
 
         # --- Step 6: Proportional allocation ---
         allocations = {
@@ -181,8 +190,8 @@ class TokenBudgetService:
             output_reservation=output_reservation,
             tool_def_tokens=tool_def_tokens,
             fixed_overhead_tokens=FIXED_OVERHEAD_TOKENS,
-            skills_tokens=SKILLS_RESERVED_TOKENS,
             usable_tokens=usable_tokens,
+            recommended_tool_count=recommended_tool_count,
             history_tokens=allocations["history"],
             embedding_chars=cls._tokens_to_chars(allocations["embeddings"]),
             tool_response_chars=cls._tokens_to_chars(allocations["tool_responses"]),
@@ -288,6 +297,56 @@ class TokenBudgetService:
         raw = json.dumps(tool_definitions, separators=(",", ":"))  # compact JSON
         measured = int(len(raw) / TOOL_CHARS_PER_TOKEN)
         return measured + TOOL_SAFETY_BUFFER_TOKENS
+
+    @classmethod
+    def _recommend_tool_count(
+        cls,
+        num_ctx: int,
+        output_reservation: int,
+        already_measured_tool_def_tokens: int,
+        tool_definitions: list[dict[str, Any]],
+    ) -> int:
+        """
+        Derives the maximum number of MCP tool definitions we can safely
+        host in the context window given num_ctx and the fixed reservations
+        (output, overhead).
+
+        Math:
+            headroom = num_ctx - output_reservation - fixed_overhead
+            per-tool budget = headroom / per_tool_tokens  (floored)
+            floor at len(tool_definitions) so we never recommend fewer
+            than the tools already in use — going lower would break the
+            current request.
+
+        If the *actual* measured cost of the current tool set already
+        exceeds what `headroom` can support, log a warning so the operator
+        sees the context is over-budget (the returned count is still
+        floored at the current size to keep the request intact).
+        """
+
+        headroom = num_ctx - output_reservation - FIXED_OVERHEAD_TOKENS
+        currently_used = len(tool_definitions)
+
+        if headroom <= 0 or TOOL_DEF_AVG_TOKENS <= 0:
+            # If we can't even afford one tool, fall back to the current count
+            # (caller can decide whether to drop tools downstream).
+            return currently_used
+
+        capacity = headroom // FIXED_OVERHEAD_TOKENS
+
+        if already_measured_tool_def_tokens > headroom and currently_used > 0:
+            logger.warning(
+                "TokenBudget: tool definitions exceed headroom "
+                "(measured=%d tokens, headroom=%d tokens, tools=%d). "
+                "Increase num_ctx or reduce connected MCP tools.",
+                already_measured_tool_def_tokens,
+                headroom,
+                currently_used,
+            )
+
+        # Floor at the current count so we never recommend fewer tools than
+        # are already wired into this request.
+        return max(int(capacity), currently_used)
 
     @staticmethod
     def _estimate_text_tokens(text: str) -> int:
