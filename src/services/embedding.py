@@ -19,9 +19,10 @@ HTTP calls here.
 import logging
 
 from pgvector.django import CosineDistance
+from django.utils import timezone
 
 from app.choices import MessageRole
-from app.models import Bot, Message, Ollama
+from app.models import Bot, Message, Ollama, CronJob
 from clients.ollama import OllamaClient
 
 logger = logging.getLogger(__name__)
@@ -62,17 +63,53 @@ class EmbeddingService:
             )
             return
 
-        vector = self._generate(message.content)
-        if vector is None:
+        content_vector = self._generate(message.content)
+        if content_vector is None:
             return
 
-        message.content_embedding = vector
+        message.content_embedding = content_vector
         message.save(update_fields=["content_embedding", "updated_at"])
 
         logger.info(
             "Embedding saved for message %s (dimensions=%d)",
             message.id,
-            len(vector),
+            len(content_vector),
+        )
+
+    def save_cron_job_embedding(self, cron_job: CronJob) -> None:
+        """
+        Generates a vector embedding for the cron job's name + description
+        and saves it to 'schedule_embedding' (along with a fresh
+        'schedule_embedding_updated_at' timestamp). Skips silently if the
+        embedding model is not configured or vector generation fails.
+        """
+
+        if not self.bot.embedding_model:
+            logger.warning(
+                "No embedding model configured on Ollama config — skipping embedding "
+                "for cron job %s. Set embedding_model in the admin panel.",
+                cron_job.id,
+            )
+            return
+
+        text_to_embed = f"{cron_job.name}. {cron_job.description}"
+        cron_job_vector = self._generate(text_to_embed)
+        if not cron_job_vector:
+            return
+
+        cron_job.schedule_embedding = cron_job_vector
+        cron_job.schedule_embedding_updated_at = timezone.now()
+        cron_job.save(
+            update_fields=[
+                "schedule_embedding",
+                "schedule_embedding_updated_at",
+            ]
+        )
+
+        logger.info(
+            "Embedding saved for cron_job %s (dimensions=%d)",
+            cron_job.id,
+            len(cron_job_vector),
         )
 
     def get_relevant_memories(
