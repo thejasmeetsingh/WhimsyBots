@@ -18,8 +18,6 @@ from cryptography.fernet import Fernet
 from django.conf import settings
 from django.utils import timezone
 
-from app.models import Message, MCPServer, Log
-
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +39,7 @@ def calculate_next_run_at(cron_expression: str) -> timezone.datetime:
     return croniter(cron_expression, current_dt).get_next(timezone.datetime)
 
 
-def get_admin_link(model: str, value: int, obj: type[Message | MCPServer | Log]) -> str:
+def get_admin_link(model: str, value: int, obj) -> str:
     """
     Generate an HTML link for admin filtering in Django admin.
 
@@ -272,7 +270,7 @@ def parse_telegram_update(update: dict[str, Any]) -> Optional[Dict[str, str]]:
 
 
 def convert_messages_to_ollama_format(
-    messages: list[Message], system_prompt: Optional[str] = None
+    messages, system_prompt: Optional[str] = None
 ) -> List[Dict[str, str]]:
     """
     Convert Message model instances to Ollama API message format.
