@@ -26,7 +26,6 @@ from app.models import Bot, Message, Ollama
 from app.utils import convert_messages_to_ollama_format
 from prompts import DEFAULT_SYSTEM_PROMPT
 from services.embedding import EmbeddingService
-from services.skills_registry import SkillsRegistry
 from services.token_budget import TokenBudget, TokenBudgetService
 from strings import SUMMARY_UNAVAILABLE
 
@@ -64,7 +63,6 @@ class ContextAssembler:
     def assemble(
         self,
         tool_definitions: list[dict[str, Any]],
-        active_mcp_server_names: list[str],
     ) -> AssembledContext:
         """
         Full pipeline:
@@ -94,6 +92,8 @@ class ContextAssembler:
         raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
             system_prompt=self.bot.system_prompt or "You are a helpful assistant",
             summary=summary_msg,
+            bot_id=str(self.bot.id),
+            timezone=settings.TIME_ZONE,
         )
 
         fitted_system_prompt = TokenBudgetService.truncate_text(
@@ -106,13 +106,6 @@ class ContextAssembler:
                 len(raw_system_prompt),
                 budget.system_prompt_chars,
             )
-
-        # Skills — static, always fits, no truncation needed
-        skills_block = SkillsRegistry.get_skills_block(
-            active_mcp_server_names,
-            bot_id=str(self.bot.id),
-            timezone=settings.TIME_ZONE,
-        )
 
         # Observed patterns — generated async, stored on bot, always protected
         patterns_block = self._fit_patterns(budget)
@@ -129,9 +122,6 @@ class ContextAssembler:
 
         if fitted_system_prompt:
             sections.append(fitted_system_prompt)
-
-        if skills_block:
-            sections.append(skills_block)
 
         if patterns_block:
             sections.append(patterns_block)
