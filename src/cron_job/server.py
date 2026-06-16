@@ -22,7 +22,7 @@ Example MCP Usage:
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select, update
@@ -265,7 +265,7 @@ async def update_cron_job(
             return f"## Validation Error\n\n{e}"
 
     # Build only the fields that were actually provided
-    changes: dict = {"updated_at": datetime.now(timezone.utc)}
+    changes: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
     if name is not None:
         changes["name"] = name
     if description is not None:
