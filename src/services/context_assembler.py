@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from app.choices import MessageRole
 from app.models import Bot, Message, Ollama
-from app.utils import convert_messages_to_ollama_format
+from utils.formatting import convert_messages_to_ollama_format
 from prompts import DEFAULT_SYSTEM_PROMPT
 from services.embedding import EmbeddingService
 from services.token_budget import TokenBudget, TokenBudgetService
@@ -174,7 +174,7 @@ class ContextAssembler:
         # Returns list of (Message, similarity_score) sorted by score desc
         embedding_svc = EmbeddingService(self.bot, self.ollama)
         raw_memories = embedding_svc.get_relevant_memories(
-            query_text=self.current_message.content,
+            query_vector=self.current_message.content_embedding,
             current_message_id=str(self.current_message.id),
             top_k=top_k,
         )
