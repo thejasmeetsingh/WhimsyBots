@@ -19,5 +19,7 @@ GENERAL_TASK_ERROR = (
     "Error caught in '{func_name}' for bot '{bot_name}'\n\nERROR: {error}"
 )
 SUMMARY_PROCESS_SUCCESS = "Summary management completed for {bots_len} bot(s)"
-GENERATE_EMBEDDING_SUCCESS = "Embedding successfully generated for bot '{bot_name}'"
+GENERATE_EMBEDDING_FAILED = (
+    "Embedding failed for {obj_type} with ID: '{obj_id}'\n\nERROR: {error}"
+)
 UPDATE_OBSERVED_PATTERNS_SUCCESS = "Patterns updated successfully for bot '{bot_name}'"
