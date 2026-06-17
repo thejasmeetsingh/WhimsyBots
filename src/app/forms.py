@@ -6,7 +6,7 @@ from django.core.cache import cache
 from pydantic import BaseModel
 
 from app.models import Bot, MCPServer, Ollama
-from app.utils import get_token_hash
+from utils.crypto import get_token_hash
 from clients import OllamaClient
 from strings import UNIQUE_TELEGRAM_TOKEN_ERROR
 

@@ -6,7 +6,7 @@ from app.choices import MessageRole
 from app.forms import BotForm, MCPServerForm
 from app.models import Bot, CronJob, Log, MCPServer, Message, Ollama
 from app.tasks import manage_conversation_summary, setup_bot_webhook
-from app.utils import get_admin_link
+from utils.formatting import get_admin_link
 
 admin.AdminSite.site_header = "WhimsyBots"
 admin.AdminSite.site_title = "WhimsyBots"
