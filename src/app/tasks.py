@@ -1,18 +1,52 @@
-"""Celery task definitions for async job processing"""
+"""
+Celery task definitions for asynchronous job processing.
+
+This module is the single entry point for all background work triggered by
+the Django web layer (views, webhooks) or by scheduled beats. Tasks are
+grouped into two categories:
+
+— Embedding generation tasks: produce and persist vector embeddings
+  for user messages, cron job schedules, and MCP server descriptions.
+— Conversation / message processing tasks: Orchestrate the full
+  bot response pipeline (intent classification, tool calling, summary
+  management, pattern observation).
+
+Conventions used throughout this module:
+
+— All tasks are bound ('@celery.task(bind=True)') so they can call
+  'self.retry(...)' with explicit backoff strategies.
+— Every task fetches the active Ollama configuration via
+  'utils.tasks.get_ollama_cfg' first; if no configuration is
+  present the task exits silently with a warning instead of raising.
+— Telegram rate-limit errors are caught explicitly and the task is
+  retried after the server-supplied 'retry_after' interval.
+— All other unexpected errors are retried with exponential backoff
+  ('RETRY_BASE_SECONDS * 2**retries' seconds) and recorded in the
+  Log table for operator visibility.
+
+Shared helpers (object lookups, error formatting, embedding dispatch)
+live in 'utils.tasks' so this module can stay focused on
+orchestration logic.
+
+The constants 'utils.tasks.MAX_RETRIES', 'utils.tasks.RETRY_BASE_SECONDS',
+'utils.tasks.DEFAULT_QUEUE' and 'utils.tasks.TELEGRAM_ALLOWED_UPDATES'
+are re-exported from 'utils.tasks' to keep a single source of truth.
+"""
+
+from __future__ import annotations
 
 import logging
-from typing import Optional
+from datetime import datetime
+from typing import Callable, Optional
 
 from django.conf import settings
-from django.utils import timezone
 from django.db.models import Prefetch
+from django.utils import timezone
 
 from app.choices import MessageRole
-from app.models import Bot, CronJob, Log, MCPServer, Message, Ollama
-from app.utils import calculate_next_run_at, get_token_hash
+from app.models import Bot, CronJob, MCPServer, Message, Ollama
 from clients import OllamaClient
-from clients.telegram import TelegramRateLimitError
-from managers import OllamaConfigManager, TelegramClientManager
+from managers import TelegramClientManager
 from services.bot_processor import BotMessageProcessor
 from services.conversation_summary import ConversationSummaryService
 from services.embedding import EmbeddingService
@@ -22,321 +56,341 @@ from strings import (
     BOT_CRON_JOB_SUCCESS,
     BOT_MSG_SUCCESS,
     GENERAL_TASK_ERROR,
-    GENERATE_EMBEDDING_SUCCESS,
+    GENERATE_EMBEDDING_FAILED,
     INVALID_BOT_TOKEN,
     NO_BOT_RESPONSE,
-    NO_OLLAMA,
-    OBJ_NOT_FOUND,
-    SUMMARY_PROCESS_SUCCESS,
-    TELEGRAM_RATE_LIMIT_ERROR,
     UPDATE_OBSERVED_PATTERNS_SUCCESS,
     WEBHOOK_SETUP_SUCCESS,
+)
+from utils.crypto import get_token_hash
+from utils.scheduling import calculate_next_run_at
+from utils.tasks import (
+    DEFAULT_QUEUE,
+    MAX_RETRIES,
+    RETRY_BASE_SECONDS,
+    TELEGRAM_ALLOWED_UPDATES,
+    build_error_description,
+    create_log,
+    generate_cron_job_embedding,
+    generate_mcp_embedding,
+    generate_message_embedding,
+    get_bot_obj,
+    get_cron_obj,
+    get_msg_obj,
+    get_ollama_cfg,
+    log_task_failure,
 )
 from whimsybots.celery import task as celery
 
 logger = logging.getLogger(__name__)
 
 
-"--------------------- HELPERS ----------------------------------"
+# ---------------------------------------------------------------------------
+# Incoming-update tasks
+# ---------------------------------------------------------------------------
 
 
-def get_ollama_cfg() -> Optional[Ollama]:
-    """Retrieve the Ollama configuration instance.
-
-    Fetches the active Ollama configuration from the config manager and returns it if available.
-    Logs a warning message if no Ollama configuration is found.
-
-    Returns:
-        The configured Ollama object, or None if not configured.
-
-    Raises:
-        No exception raised; logs warning instead when Ollama is unavailable.
-    """
-
-    ollama = OllamaConfigManager.get_ollama_config()
-    if ollama:
-        return ollama
-
-    logger.warning(NO_OLLAMA)
-
-
-def get_bot_obj(bot_id: str) -> Optional[Bot]:
-    """Retrieve a Bot instance by its ID.
-
-    Fetches the bot object from the database using the provided bot ID (UUID).
-    Handles the case where no bot exists with the given ID and logs an error message.
-
-    Args:
-        bot_id: The UUID string of the bot to retrieve.
-
-    Returns:
-        The Bot instance if found, or None if not found.
-
-    Raises:
-        No exception raised; logs error instead when bot is not found.
-    """
-
-    try:
-        bot = Bot.objects.get(id=bot_id)
-        return bot
-    except Bot.DoesNotExist:
-        logger.error(OBJ_NOT_FOUND.format(obj_type="bot", obj_id=bot_id))
-
-
-def get_cron_obj(cron_job_id: str) -> Optional[CronJob]:
-    """Retrieve a CronJob instance by its ID.
-
-    Fetches the cron job object from the database using the provided cron job ID (UUID).
-    Handles the case where no cron job exists with the given ID and logs an error message.
-
-    Args:
-        cron_job_id: The UUID string of the cron job to retrieve.
-
-    Returns:
-        The CronJob instance if found, or None if not found.
-
-    Raises:
-        No exception raised; logs error instead when cron job is not found.
-    """
-
-    try:
-        cron_job = CronJob.objects.get(id=cron_job_id)
-        return cron_job
-    except CronJob.DoesNotExist:
-        logger.error(OBJ_NOT_FOUND.format(obj_type="cron job", obj_id=cron_job_id))
-
-
-def get_msg_obj(msg_id: str) -> Optional[Message]:
-    """Retrieve a Message instance by its ID.
-
-    Fetches the message object from the database using the provided message ID (UUID).
-    Handles the case where no message exists with the given ID and logs an error message.
-
-    Args:
-        msg_id: The UUID string of the message to retrieve.
-
-    Returns:
-        The Message instance if found, or None if not found.
-
-    Raises:
-        No exception raised; logs error instead when message is not found.
-    """
-
-    try:
-        message = Message.objects.get(id=msg_id)
-        return message
-    except Message.DoesNotExist:
-        logger.error(OBJ_NOT_FOUND.format(obj_type="message", obj_id=msg_id))
-
-
-def create_log(bot: Bot, is_success: bool, desc: str) -> None:
-    """Create a new Log entry for the given bot.
-
-    Creates and saves a new log record associated with the specified bot, recording
-    whether an operation succeeded or failed along with a description of what occurred.
-
-    Args:
-        bot: The Bot instance to associate this log entry with.
-        is_success: Boolean indicating if the logged operation was successful (True) or failed (False).
-        desc: A string describing the action that was performed and its outcome.
-
-    Returns:
-        None; creates a new Log record in the database.
-    """
-
-    Log.objects.create(bot=bot, is_success=is_success, description=desc)
-
-
-"--------------------- TASKS ------------------------------------"
-
-
-@celery.task(bind=True, max_retries=3)
+@celery.task(bind=True, max_retries=MAX_RETRIES)
 def telegram_msg_handler(self, bot_token: str, update: dict) -> None:
     """
-    Fetch bot object from given bot token and processs the given update from telegram
-    """
+    Dispatch a single Telegram update to the appropriate bot.
 
-    try:
-        # Fetch active bots
-        bot_token_hash = get_token_hash(bot_token)
-        bot = Bot.objects.get(telegram_bot_token_hash=bot_token_hash)
-        TelegramUpdateHandler.handle_update(bot, update)
-    except Bot.DoesNotExist:
-        logger.error(INVALID_BOT_TOKEN.format(bot_token=bot_token))
-    except Exception as e:
-        logger.error("Telegram poller failed", exc_info=True)
-        # Retry after 60 seconds
-        raise self.retry(exc=e, countdown=60)
+    The bot is resolved by hashing the incoming token (the hash is stored
+    at 'Bot.telegram_bot_token_hash' so we never touch the encrypted
+    plaintext during lookup). If the bot does not exist, the update is
+    silently dropped with an error log — most likely a stale webhook
+    pointing at a deleted bot. Any other exception is retried after 60s.
 
-
-@celery.task(bind=True, max_retries=3)
-def cron_job_poller(self) -> None:
-    """
-    Poll cron jobs for all the active bots that are due for execution and queue them for processing.
-
-    This task runs periodically to check if any scheduled cron job need to be executed
-    and updates their next scheduled run time.
+    Args:
+        bot_token: The plaintext Telegram bot token extracted from the
+            inbound webhook URL. Used only to compute the lookup hash.
+        update: The full Telegram update payload as a dict.
 
     Returns:
-        Status message
+        None. The work is performed by TelegramUpdateHandler
+        which enqueues the follow-up tasks.
     """
 
     try:
-        current_dt = timezone.now()
+        bot_token_hash = get_token_hash(bot_token)
+        bot = Bot.objects.get(telegram_bot_token_hash=bot_token_hash)
+    except Bot.DoesNotExist:
+        logger.error(INVALID_BOT_TOKEN.format(bot_token=bot_token))
+        return
 
-        # Check if Ollama is configured
-        ollama = get_ollama_cfg()
-        if not ollama:
-            return
+    try:
+        TelegramUpdateHandler.handle_update(bot, update)
+    except Exception as exc:
+        logger.error("Telegram update handler failed", exc_info=True)
+        raise self.retry(exc=exc, countdown=RETRY_BASE_SECONDS)
 
-        # Find cron jobs due for execution
-        due_jobs = CronJob.objects.filter(
+
+# ---------------------------------------------------------------------------
+# Cron job scheduling tasks
+# ---------------------------------------------------------------------------
+
+
+def _find_due_cron_jobs(current_dt: datetime) -> list[CronJob]:
+    """
+    Return active cron jobs whose 'next_run_at' has just elapsed.
+
+    Args:
+        current_dt: Reference timestamp used to decide which jobs are due.
+            Typically 'django.utils.timezone.now'.
+
+    Returns:
+        A list of 'CronJob' instances ready to be dispatched.
+    """
+
+    return list(
+        CronJob.objects.filter(
             is_active=True,
             bot__is_active=True,
             bot__telegram_chat_id__isnull=False,
             next_run_at__lte=current_dt,
         )
-
-        logger.info(f"Found {due_jobs.count()} cron jobs due for execution")
-
-        # Queue each bot for processing on default worker
-        for job in due_jobs:
-            # Regenerate the schedule embedding if it's missing or stale
-            # (i.e. older than the cron job's last update).
-            if job.schedule_embedding is None or (
-                job.schedule_embedding_updated_at
-                and job.schedule_embedding_updated_at < job.updated_at
-            ):
-                embedding_svc = EmbeddingService(bot=job.bot, ollama=ollama)
-                embedding_svc.save_cron_job_embedding(cron_job=job)
-
-            process_cron_job.apply_async(
-                queue="default",
-                kwargs={"job_id": str(job.id)},
-                eta=job.next_run_at,
-            )
-
-    except Exception as e:
-        logger.error("Cron job poller failed", exc_info=True)
-        # Retry after 60 seconds
-        raise self.retry(exc=e, countdown=60)
+    )
 
 
-@celery.task(bind=True, max_retries=3)
-def setup_bot_webhook(self, bot_id: str) -> None:
+def _refresh_cron_job_embedding_if_stale(job: CronJob, ollama: Ollama) -> None:
     """
-    Set up Telegram webhook for a bot.
+    Regenerate a cron job's schedule embedding if it is missing or stale.
 
-    Fetches the bot configuration, constructs the webhook URL,
-    and registers it with Telegram API.
+    A job's embedding is considered stale when 'schedule_embedding' is
+    absent, or when it was last updated before the job itself (e.g. the
+    operator edited the schedule since the last embedding run).
 
     Args:
-        bot_id: UUID of the bot to configure webhook for
+        job: The CronJob to inspect / refresh.
+        ollama: Active Ollama configuration.
+    """
 
-    Returns:
-        Status message
+    embedding = job.schedule_embedding
+    updated_at = job.schedule_embedding_updated_at
 
-    Raises:
-        celery.exceptions.MaxRetriesExceededError: If webhook setup fails after all retries
+    if embedding is not None and not (updated_at and updated_at < job.updated_at):
+        return
+
+    EmbeddingService(bot=job.bot, ollama=ollama).save_cron_job_embedding(cron_job=job)
+
+
+def _dispatch_cron_job(job: CronJob) -> None:
+    """
+    Enqueue 'process_cron_job' to run at the job's scheduled time.
+
+    Args:
+        job: The CronJob to enqueue. Its 'next_run_at' is used
+            as the Celery 'eta' so the worker picks it up exactly on time.
+    """
+
+    process_cron_job.apply_async(
+        queue=DEFAULT_QUEUE,
+        kwargs={"job_id": str(job.id)},
+        eta=job.next_run_at,
+    )
+
+
+@celery.task(bind=True, max_retries=MAX_RETRIES)
+def cron_job_poller(self) -> None:
+    """
+    Enqueue every cron job whose 'next_run_at' has just elapsed.
+
+    Runs periodically (driven by Celery beat / cron). For each due job it:
+
+    1. Refreshes the schedule embedding if it is missing or out of date.
+    2. Enqueues 'process_cron_job' to fire at 'next_run_at'.
+
+    The task itself does not perform any work that can fail at the message
+    level — if an unexpected error is raised, the whole poll is retried
+    after 'RETRY_BASE_SECONDS' seconds.
     """
 
     try:
+        ollama = get_ollama_cfg()
+        if ollama is None:
+            return
+
+        due_jobs = _find_due_cron_jobs(current_dt=timezone.now())
+        logger.info("Found %d cron jobs due for execution", len(due_jobs))
+
+        for job in due_jobs:
+            _refresh_cron_job_embedding_if_stale(job, ollama)
+            _dispatch_cron_job(job)
+
+    except Exception as exc:
+        logger.error("Cron job poller failed", exc_info=True)
+        raise self.retry(exc=exc, countdown=RETRY_BASE_SECONDS)
+
+
+# ---------------------------------------------------------------------------
+# Webhook setup
+# ---------------------------------------------------------------------------
+
+
+def _build_webhook_url(bot: Bot) -> str:
+    """
+    Construct the public URL Telegram should deliver updates to.
+
+    The base URL is read from 'settings.WEBHOOK_BASE_URL'; trailing
+    slashes are stripped before joining the bot's token. The trailing
+    slash is significant — Telegram does not follow redirects for
+    webhook deliveries.
+
+    Args:
+        bot: The Bot whose webhook URL is being constructed.
+
+    Returns:
+        The fully qualified webhook URL as a string.
+    """
+
+    base = settings.WEBHOOK_BASE_URL.strip("/")
+    return f"{base}/webhook/{bot.telegram_bot_token}/"
+
+
+@celery.task(bind=True, max_retries=MAX_RETRIES)
+def setup_bot_webhook(self, bot_id: str) -> None:
+    """
+    Register the bot's webhook URL with the Telegram Bot API.
+
+    Skipped for inactive bots (no error, no retry). On failure the task
+    records the error in the Log table and retries with a fixed
+    60s backoff.
+
+    Args:
+        bot_id: UUID (as 'str') of the bot to configure.
+
+    Returns:
+        None. Side effects: a 'Log' row and a Telegram API call.
+    """
+
+    bot: Optional[Bot] = None
+    try:
         bot = get_bot_obj(bot_id=bot_id)
-        if not bot:
+        if bot is None:
             return
 
         if not bot.is_active:
-            logger.info(f"Skipping webhook setup for inactive bot: {bot.name}")
-            return "Bot is inactive, webhook setup skipped"
+            logger.info("Skipping webhook setup for inactive bot: %s", bot.name)
+            return
 
-        # Construct webhook URL
-        webhook_url = (
-            f"{settings.WEBHOOK_BASE_URL.strip('/')}/webhook/{bot.telegram_bot_token}/"
-        )
+        webhook_url = _build_webhook_url(bot)
+        logger.info("Setting up webhook for bot '%s' at: %s", bot.name, webhook_url)
 
-        logger.info(f"Setting up webhook for bot '{bot.name}' at: {webhook_url}")
-
-        # Create Telegram client and set webhook
         telegram_client = TelegramClientManager.create_client(bot)
         response = telegram_client.set_webhook(
-            url=webhook_url, allowed_updates=["message"]
+            url=webhook_url, allowed_updates=TELEGRAM_ALLOWED_UPDATES
         )
 
-        log = WEBHOOK_SETUP_SUCCESS.format(bot_name=bot.name)
+        success_msg = WEBHOOK_SETUP_SUCCESS.format(bot_name=bot.name)
+        create_log(bot=bot, is_success=True, desc=success_msg)
+        logger.info("%s: %s", success_msg, response)
 
-        # Create Log
-        create_log(bot=bot, is_success=True, desc=log)
-
-        logger.info(f"{log}: {response}")
-
-    except Exception as e:
-        logger.error(f"Webhook setup failed for bot {bot_id}: {e}", exc_info=True)
-
-        # Create an error log
-        create_log(
-            bot=bot,
-            is_success=False,
-            desc=GENERAL_TASK_ERROR.format(
-                func_name="setup_bot_webhook",
-                bot_name=bot.name,
-                error=str(e),
-            ),
+    except Exception as exc:
+        description = GENERAL_TASK_ERROR.format(
+            func_name="setup_bot_webhook",
+            bot_name=bot.name if bot else "unknown",
+            error=str(exc),
         )
+        log_task_failure(
+            bot,
+            description=description,
+            log_message=f"Webhook setup failed for bot {bot_id}",
+        )
+        raise self.retry(exc=exc, countdown=RETRY_BASE_SECONDS)
 
-        raise self.retry(exc=e, countdown=60)
+
+# ---------------------------------------------------------------------------
+# Per-job / per-message processing tasks
+# ---------------------------------------------------------------------------
 
 
-@celery.task(bind=True, max_retries=3)
-def process_cron_job(self, job_id: str) -> None:
+def _build_processor(bot: Bot, ollama: Ollama) -> BotMessageProcessor:
     """
-    Process the given cron job and update its metadata after processing
+    Construct the BotMessageProcessor used by message / cron tasks.
+
+    Centralises client wiring so both task bodies share the exact same
+    configuration.
 
     Args:
-        job_id: ID of the cron job object
+        bot: The Bot the processor will operate on.
+        ollama: Active Ollama configuration.
 
     Returns:
-        Status message
-
-    Raises:
-        TelegramRateLimitError: If telegram sends a 429 error
-        Retries on failure with exponential backoff
+        A fully wired BotMessageProcessor instance.
     """
+
+    ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
+    return BotMessageProcessor(bot, ollama, ollama_client)
+
+
+def _update_cron_job_schedule(cron_job: CronJob) -> None:
+    """
+    Persist the next and last run timestamps for a cron job.
+
+    'next_run_at' is recomputed from the cron expression, and
+    'last_run_at' is stamped with the current time. Only the two
+    timestamp fields are written — keeping the update 'UPDATE' small
+    avoids touching unrelated columns and minimises row-locking surface.
+
+    Args:
+        cron_job: The CronJob to update. Mutated in place.
+    """
+
+    cron_job.next_run_at = calculate_next_run_at(cron_job.cron_expression)
+    cron_job.last_run_at = timezone.now()
+    cron_job.save(update_fields=["next_run_at", "last_run_at"])
+
+
+@celery.task(bind=True, max_retries=MAX_RETRIES)
+def process_cron_job(self, job_id: str) -> None:
+    """
+    Execute a single scheduled cron job and deliver the bot's response.
+
+    Pipeline:
+        1. Resolve the Ollama config and CronJob row.
+        2. Ask the bot to produce a response (with the 'cron_job' MCP
+           server excluded from the available tool set).
+        3. Send the response to the user via Telegram.
+        4. Kick off 'manage_conversation_summary' on the default queue.
+        5. Update the job's schedule metadata.
+        6. Record a success or error log.
+
+    Args:
+        job_id: UUID (as 'str') of the cron job to run.
+
+    Returns:
+        None. Side effects: Telegram message, Log row, possibly a
+        summary task.
+    """
+
+    cron_job: Optional[CronJob] = None
     try:
         ollama = get_ollama_cfg()
-        if not ollama:
+        if ollama is None:
             return
 
         cron_job = get_cron_obj(cron_job_id=job_id)
-        if not cron_job:
+        if cron_job is None:
             return
 
-        # Initialize clients and processor
-        ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
-        processor = BotMessageProcessor(cron_job.bot, ollama, ollama_client)
-
-        # Process cron job
+        processor = _build_processor(cron_job.bot, ollama)
         response, ollama_ms = processor.process_cron_job(cron_job=cron_job)
 
         if not response:
             logger.info(NO_BOT_RESPONSE.format(bot_name=cron_job.bot.name))
             return
 
-        # Send response
         processor.send_response(response=response)
 
-        # Trigger summary management after response is sent
+        # Trigger summary management after response is sent.
         manage_conversation_summary.apply_async(
-            queue="default",
+            queue=DEFAULT_QUEUE,
             kwargs={"bot_id": str(cron_job.bot_id)},
         )
         logger.info("Conversation summary task queued")
 
-        # Update cron job metadata
-        cron_job.next_run_at = calculate_next_run_at(cron_job.cron_expression)
-        cron_job.last_run_at = timezone.now()
-        cron_job.save(update_fields=["next_run_at", "last_run_at"])
+        _update_cron_job_schedule(cron_job)
 
-        # Create a success log
         create_log(
             bot=cron_job.bot,
             is_success=True,
@@ -345,309 +399,435 @@ def process_cron_job(self, job_id: str) -> None:
             ),
         )
 
-    except Exception as e:
-        bot_name = cron_job.bot.name
-
-        if isinstance(e, TelegramRateLimitError):
-            desc = TELEGRAM_RATE_LIMIT_ERROR.format(
-                func_name="process_cron_job", bot_name=bot_name, error=str(e)
-            )
-            retry = e.retry_after
-        else:
-            desc = GENERAL_TASK_ERROR.format(
-                func_name="process_cron_job", bot_name=bot_name, error=str(e)
-            )
-            retry = 2**self.request.retries
-
-        # Create an error log
-        create_log(bot=cron_job.bot, is_success=False, desc=desc)
-
-        logger.error("Failed to process cron job", exc_info=True)
-        raise self.retry(exc=e, countdown=60 * retry)
+    except Exception as exc:
+        bot = cron_job.bot if cron_job is not None else None
+        description, retry_minutes = build_error_description(
+            func_name="process_cron_job",
+            bot=bot,
+            error=exc,
+        )
+        log_task_failure(bot, description, "Failed to process cron job")
+        raise self.retry(exc=exc, countdown=RETRY_BASE_SECONDS * retry_minutes)
 
 
-@celery.task(bind=True, max_retries=3)
-def process_inbound_message(self, bot_id: str, msg_id: str) -> None:
+def _queue_post_response_followups(bot: Bot, ollama: Ollama, bot_id: str) -> None:
     """
-    Process an inbound message through intent classification and tool execution.
+    Enqueue async work that should run after a user message is answered.
+
+    Currently this includes:
+
+    — 'manage_conversation_summary': always queued.
+    — 'regenerate_observed_patterns': only when the pattern service
+      signals that a refresh is due (every N user messages).
 
     Args:
-        bot_id: ID of the bot processing the message
-        msg_id: ID of the message to process
-
-    Returns:
-        Status message
-
-    Raises:
-        TelegramRateLimitError: If telegram sends a 429 error
-        Retries on failure with exponential backoff
+        bot: The Bot that just produced a response.
+        ollama: Active Ollama configuration (used to evaluate
+            whether patterns should be regenerated).
+        bot_id: The bot's UUID (as 'str') — passed as a Celery kwarg.
     """
 
+    manage_conversation_summary.apply_async(
+        queue=DEFAULT_QUEUE,
+        kwargs={"bot_id": bot_id},
+    )
+    logger.info("Conversation summary task queued")
+
+    pattern_svc = ObservedPatternsService(bot=bot, ollama=ollama)
+    if pattern_svc.should_regenerate():
+        regenerate_observed_patterns.apply_async(
+            queue=DEFAULT_QUEUE,
+            kwargs={"bot_id": bot_id},
+        )
+        logger.info("Pattern observation task queued")
+
+
+@celery.task(bind=True, max_retries=MAX_RETRIES)
+def process_inbound_message(self, bot_id: str, msg_id: str) -> None:
+    """
+    Generate and deliver a response to a single inbound user message.
+
+    Pipeline:
+        1. Resolve Ollama config, Bot, Message.
+        2. Run the tool-calling loop via BotMessageProcessor.
+        3. Send the response and persist it in the conversation history.
+        4. Queue summary management and (conditionally) pattern refresh.
+        5. Record a success or error log.
+
+    Args:
+        bot_id: UUID (as 'str') of the owning bot.
+        msg_id: UUID (as 'str') of the user message to process.
+
+    Returns:
+        None. Side effects: Telegram message, Message row, Log
+        row, possibly summary / pattern tasks.
+    """
+
+    bot: Optional[Bot] = None
     try:
         ollama = get_ollama_cfg()
-        if not ollama:
+        if ollama is None:
             return
 
         bot = get_bot_obj(bot_id=bot_id)
-        if not bot:
+        if bot is None:
             return
 
         message = get_msg_obj(msg_id=msg_id)
-        if not message:
+        if message is None:
             return
 
-        # Initialize clients and processor
-        ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
-        processor = BotMessageProcessor(bot, ollama, ollama_client)
-
-        # Process message
+        processor = _build_processor(bot, ollama)
         response, ollama_ms = processor.process_message(message=message)
 
         if not response:
             logger.info(NO_BOT_RESPONSE.format(bot_name=bot.name))
             return
 
-        # Send response
         processor.send_response(response=response)
 
-        # Trigger summary management after response is sent
-        manage_conversation_summary.apply_async(
-            queue="default",
-            kwargs={"bot_id": bot_id},
-        )
-        logger.info("Conversation summary task queued")
+        _queue_post_response_followups(bot=bot, ollama=ollama, bot_id=bot_id)
 
-        # Conditionally regenerate observed patterns
-        pattern_svc = ObservedPatternsService(bot=bot, ollama=ollama)
-        if pattern_svc.should_regenerate():
-            regenerate_observed_patterns.apply_async(
-                queue="default",
-                kwargs={"bot_id": bot_id},
-            )
-            logger.info("Pattern observation task queued")
-
-        # Create a success log
         create_log(
             bot=bot,
             is_success=True,
             desc=BOT_MSG_SUCCESS.format(bot_name=bot.name, duration=ollama_ms),
         )
 
-    except Exception as e:
-        if isinstance(e, TelegramRateLimitError):
-            desc = TELEGRAM_RATE_LIMIT_ERROR.format(
-                func_name="process_inbound_message", bot_name=bot.name, error=str(e)
-            )
-            retry = e.retry_after
-        else:
-            desc = GENERAL_TASK_ERROR.format(
-                func_name="process_inbound_message", bot_name=bot.name, error=str(e)
-            )
-            retry = 2**self.request.retries
-
-        # Create an error log
-        create_log(bot=bot, is_success=False, desc=desc)
-
-        logger.error("Failed to process inbound message", exc_info=True)
-        raise self.retry(exc=e, countdown=60 * retry)
+    except Exception as exc:
+        description, retry_minutes = build_error_description(
+            func_name="process_inbound_message",
+            bot=bot,
+            error=exc,
+        )
+        log_task_failure(bot, description, "Failed to process inbound message")
+        raise self.retry(exc=exc, countdown=RETRY_BASE_SECONDS * retry_minutes)
 
 
-@celery.task(bind=True, max_retries=3)
-def manage_conversation_summary(self, bot_id: Optional[str] = None) -> None:
+# ---------------------------------------------------------------------------
+# Summary management task
+# ---------------------------------------------------------------------------
+
+
+def _build_summary_bot_queryset(bot_id: Optional[str]):
     """
-    Manage context window optimization for one or all active bots.
+    Return the bot queryset used by 'manage_conversation_summary'.
 
-    Called after a message is sent to the user (process_inbound_message,
-    process_cron_job) with a bot_id to process a single bot.
+    The queryset eagerly loads (via 'prefetch_related') every related
+    collection that ConversationSummaryService needs to consult:
 
-    Called without bot_id when triggered from the Ollama admin save_model
-    override — in that case all active bots are processed.
+    — conversations: user / assistant messages.
+    — system_messages: system messages (used as the existing summary seed when present).
+    — mcp_servers_list: active MCP servers used to compute the token budget for the summary.
 
     Args:
-        bot_id: ID of the bot to process. If None, processes all active bots.
+        bot_id: When provided, scope the queryset to a single bot.
+            Otherwise fetch every active bot.
 
     Returns:
-        Status message
+        A Django queryset of Bot instances with the prefetches attached.
+    """
 
-    Raises:
-        Retries on failure with exponential backoff
+    filters = {"id": bot_id} if bot_id else {"is_active": True}
+
+    return Bot.objects.filter(**filters).prefetch_related(
+        Prefetch(
+            lookup="messages",
+            queryset=Message.objects.filter(
+                role__in=[
+                    MessageRole.USER.value[0],
+                    MessageRole.ASSISTANT.value[0],
+                ]
+            ),
+            to_attr="conversations",
+        ),
+        Prefetch(
+            lookup="messages",
+            queryset=Message.objects.filter(role=MessageRole.SYSTEM.value[0]),
+            to_attr="system_messages",
+        ),
+        Prefetch(
+            lookup="mcp_servers",
+            queryset=MCPServer.objects.filter(is_active=True),
+            to_attr="mcp_servers_list",
+        ),
+    )
+
+
+def _process_bot_summary(bot: Bot, ollama: Ollama, ollama_client: OllamaClient):
+    """
+    Run ConversationSummaryService for a single bot.
+
+    Returns the service's 'process()' result untouched so the caller can
+    classify the summary as "create" vs "update".
+
+    Args:
+        bot: The Bot to evaluate.
+        ollama: Active Ollama configuration.
+        ollama_client: A live OllamaClient used by the service.
+
+    Returns:
+        The result of 'ConversationSummaryService.process()' (typically a
+        '(Message, created)' tuple) or None if the bot has no conversation to summarise.
+    """
+
+    if not getattr(bot, "conversations", None):
+        return None
+    return ConversationSummaryService(bot, ollama, ollama_client).process()
+
+
+def _persist_summaries(
+    summaries_to_create: list[Message],
+    summaries_to_update: list[Message],
+) -> None:
+    """
+    Bulk-write pending summary changes to the database.
+
+    Using 'bulk_create' / 'bulk_update' keeps this task's query count
+    constant regardless of how many bots are processed in a single run,
+    which matters when the task is invoked without a 'bot_id' (all
+    active bots at once).
+
+    Args:
+        summaries_to_create: New summary Message rows to insert.
+        summaries_to_update: Existing summary Message rows whose
+            'content' should be overwritten in-place.
+    """
+
+    if summaries_to_create:
+        Message.objects.bulk_create(summaries_to_create)
+        logger.info("Bulk created %d summaries", len(summaries_to_create))
+
+    if summaries_to_update:
+        Message.objects.bulk_update(summaries_to_update, ["content"])
+        logger.info("Bulk updated %d summaries", len(summaries_to_update))
+
+
+@celery.task(bind=True, max_retries=MAX_RETRIES)
+def manage_conversation_summary(self, bot_id: Optional[str] = None) -> None:
+    """
+    Compact conversation history for one bot, or every active bot.
+
+    The function is invoked in two ways:
+
+    — Per bot ('bot_id' set): From 'process_inbound_message' and
+      'process_cron_job' after a response is delivered.
+    — Global ('bot_id' is None): From the admin panel's
+      'save_model' override when the operator changes the LLM config
+      and every bot's context window must be re-evaluated.
+
+    For each bot the function calls 'ConversationSummaryService.process'.
+    New summary messages are inserted via 'bulk_create'; existing ones are updated in-place via
+    'bulk_update'.
+
+    Args:
+        bot_id: UUID (as 'str') of a single bot, or None to process
+            every active bot.
+
+    Returns:
+        None. Side effects: potential Message inserts / updates.
     """
 
     try:
         ollama = get_ollama_cfg()
-        if not ollama:
+        if ollama is None:
             return
 
         ollama_client = OllamaClient(ollama.endpoint, api_key=ollama.api_key)
+        bots = _build_summary_bot_queryset(bot_id=bot_id)
 
-        # Adjust filter based on bot_id parameter
-        filters = {"id": bot_id} if bot_id else {"is_active": True}
-
-        # Fetch bots with messages
-        bots = Bot.objects.filter(**filters).prefetch_related(
-            Prefetch(
-                lookup="messages",
-                queryset=Message.objects.filter(
-                    role__in=[
-                        MessageRole.USER.value[0],
-                        MessageRole.ASSISTANT.value[0],
-                    ]
-                ),
-                to_attr="conversations",
-            ),
-            Prefetch(
-                lookup="messages",
-                queryset=Message.objects.filter(role=MessageRole.SYSTEM.value[0]),
-                to_attr="system_messages",
-            ),
-            Prefetch(
-                lookup="mcp_servers",
-                queryset=MCPServer.objects.filter(is_active=True),
-                to_attr="mcp_servers_list",
-            ),
-        )
-
-        summaries_to_update = []
-        summaries_to_create = []
+        summaries_to_create: list[Message] = []
+        summaries_to_update: list[Message] = []
 
         for bot in bots:
-            # Only create summary if there is conversation records
-            if hasattr(bot, "conversations") and bot.conversations:
-                service = ConversationSummaryService(
-                    bot,
-                    ollama,
-                    ollama_client,
-                )
-                result = service.process()
+            result = _process_bot_summary(bot, ollama, ollama_client)
+            if not result:
+                continue
 
-                if result:
-                    summary_msg, created = result
-                    if created:
-                        summaries_to_create.append(summary_msg)
-                    else:
-                        summaries_to_update.append(summary_msg)
+            summary_msg, created = result
+            if created:
+                summaries_to_create.append(summary_msg)
+            else:
+                summaries_to_update.append(summary_msg)
 
-        # Batch DB writes to minimize query count
-        if summaries_to_create:
-            Message.objects.bulk_create(summaries_to_create)
-            logger.info(f"Bulk created {len(summaries_to_create)} summaries")
+        _persist_summaries(summaries_to_create, summaries_to_update)
+        logger.info("Summary management completed for %d bot(s)", bots.count())
 
-        if summaries_to_update:
-            Message.objects.bulk_update(summaries_to_update, ["content"])
-            logger.info(f"Bulk updated {len(summaries_to_update)} summaries")
-
-        logger.info(SUMMARY_PROCESS_SUCCESS.format(bots_len=bots.count()))
-
-    except Exception as e:
+    except Exception as exc:
         logger.error("Failed to manage conversation summaries", exc_info=True)
-        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
+        raise self.retry(
+            exc=exc, countdown=RETRY_BASE_SECONDS * (2**self.request.retries)
+        )
 
 
-@celery.task(bind=True, max_retries=3)
-def generate_embedding(self, message_id: str) -> None:
+# ---------------------------------------------------------------------------
+# Embedding generation task (fan-in entry point)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_single_embedding_target(
+    message_id: Optional[str],
+    cron_job_id: Optional[str],
+    mcp_server_id: Optional[str],
+) -> Optional[tuple[str, str, Callable[[Ollama], Optional[Bot]]]]:
     """
-    Generates and saves the content_embedding vector for a user message.
+    Validate the embedding request and return the dispatch function.
 
-    - Always runs after the response is sent (non-blocking)
-    - Skips silently if embedding already exists or role != USER
-    - Retries with exponential backoff on transient failures
+    Exactly one of 'message_id', 'cron_job_id' or 'mcp_server_id'
+    must be provided. When the validation passes, the returned triple
+    contains:
+
+    — obj_type: Human-readable label used in error logs.
+    — obj_id: The actual ID (as 'str') being processed.
+    — dispatch: A callable that performs the embedding work given
+      an active Ollama instance.
+
+    Args:
+        message_id: Optional message UUID.
+        cron_job_id: Optional cron job UUID.
+        mcp_server_id: Optional MCP server UUID.
+
+    Returns:
+        '(obj_type, obj_id, dispatch)' on success, None when the
+        request is invalid (no IDs, or more than one ID).
     """
+
+    provided = {
+        "Message": (message_id, generate_message_embedding),
+        "Cron Job": (cron_job_id, generate_cron_job_embedding),
+        "MCPServer": (mcp_server_id, generate_mcp_embedding),
+    }
+    provided = {key: (value, fn) for key, (value, fn) in provided.items() if value}
+
+    if not provided:
+        logger.error("Invalid embedding request received: no target ID supplied")
+        return None
+
+    if len(provided) > 1:
+        logger.error(
+            "Invalid embedding request received: expected exactly one ID, got %s",
+            list(provided),
+        )
+        return None
+
+    ((obj_type, (obj_id, dispatch)),) = provided.items()
+    return obj_type, obj_id, dispatch
+
+
+@celery.task(bind=True, max_retries=MAX_RETRIES)
+def generate_embedding(
+    self,
+    message_id: Optional[str] = None,
+    cron_job_id: Optional[str] = None,
+    mcp_server_id: Optional[str] = None,
+) -> None:
+    """
+    Generate and persist the embedding for exactly one target object.
+
+    Acts as a fan-in entry point: callers dispatch a single Celery task
+    with the appropriate ID and the function routes the work to the
+    correct 'generate_*_embedding' helper. The task retries with
+    exponential backoff ('60 * 2**retries' seconds) on failure and
+    records an error log row attributed to the owning bot when possible.
+
+    Args:
+        message_id: UUID (as 'str') of the message to embed.
+        cron_job_id: UUID (as 'str') of the cron job to embed.
+        mcp_server_id: UUID (as 'str') of the MCP server to embed.
+
+    Returns:
+        None. Side effects: a row in 'content_embedding' /
+        'schedule_embedding' / 'tools_description_embedding' (and
+        possibly a follow-up 'process_inbound_message' task for
+        message targets).
+    """
+
+    bot: Optional[Bot] = None
+    obj_type: Optional[str] = None
+    obj_id: Optional[str] = None
 
     try:
+        target = _resolve_single_embedding_target(
+            message_id=message_id,
+            cron_job_id=cron_job_id,
+            mcp_server_id=mcp_server_id,
+        )
+        if target is None:
+            return
+        obj_type, obj_id, dispatch = target
+
         ollama = get_ollama_cfg()
-        if not ollama:
+        if ollama is None:
             return
 
-        message = get_msg_obj(msg_id=message_id)
-        if not message:
-            return
+        bot = dispatch(ollama)
 
-        if message.role != MessageRole.USER.value[0]:
-            logger.debug("Skipping embedding for non-user message %s", message_id)
-            return
-
-        if message.content_embedding is not None:
-            logger.debug(
-                "Embedding already exists for message %s, skipping", message_id
+    except Exception as exc:
+        logger.error("Generate embedding failed", exc_info=True)
+        if bot is not None and obj_type is not None and obj_id is not None:
+            create_log(
+                bot=bot,
+                is_success=False,
+                desc=GENERATE_EMBEDDING_FAILED.format(
+                    obj_type=obj_type,
+                    obj_id=obj_id,
+                    error=str(exc),
+                ),
             )
-            return
-
-        embedding_svc = EmbeddingService(bot=message.bot, ollama=ollama)
-        embedding_svc.save_message_embedding(message=message)
-
-        # Queue for processing on default worker
-        process_inbound_message.apply_async(
-            queue="default",
-            kwargs={"bot_id": str(message.bot_id), "msg_id": str(message.id)},
+        raise self.retry(
+            exc=exc, countdown=RETRY_BASE_SECONDS * (2**self.request.retries)
         )
 
-        # Create a success log
-        create_log(
-            bot=message.bot,
-            is_success=True,
-            desc=GENERATE_EMBEDDING_SUCCESS.format(bot_name=message.bot.name),
-        )
 
-    except Exception as e:
-        logger.error(
-            "generate_embedding failed for message %s", message_id, exc_info=True
-        )
-
-        # Create an error log
-        create_log(
-            bot=message.bot,
-            is_success=False,
-            desc=GENERAL_TASK_ERROR.format(
-                func_name="generate_embedding", bot_name=message.bot.name, error=str(e)
-            ),
-        )
-
-        # Exponential backoff: 60s, 120s, 240s
-        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
+# ---------------------------------------------------------------------------
+# Observed-pattern regeneration task
+# ---------------------------------------------------------------------------
 
 
-@celery.task(bind=True, max_retries=3)
+@celery.task(bind=True, max_retries=MAX_RETRIES)
 def regenerate_observed_patterns(self, bot_id: str) -> None:
     """
-    Analyzes recent conversation history and updates Bot.observed_patterns
-    with a compact behavioral profile (always capped at 4096 chars).
+    Re-derive a bot's behavioural profile from recent conversation history.
 
-    Triggered every PATTERN_REGEN_EVERY_N_MESSAGES user messages.
+    Triggered every 'PATTERN_REGEN_EVERY_N_MESSAGES' user messages
+    (see 'services.observed_patterns.ObservedPatternsService'). Runs
+    out-of-band so the per-message processing path stays cheap.
+
+    Args:
+        bot_id: UUID (as 'str') of the bot whose patterns should be
+            refreshed.
+
+    Returns:
+        None. Side effects: 'Bot.observed_patterns' updated,
+        success or error row added to the Log table.
     """
 
+    bot: Optional[Bot] = None
     try:
         ollama = get_ollama_cfg()
-        if not ollama:
+        if ollama is None:
             return
 
         bot = get_bot_obj(bot_id=bot_id)
-        if not bot:
+        if bot is None:
             return
 
-        pattern_svc = ObservedPatternsService(bot=bot, ollama=ollama)
-        pattern_svc.regenerate()
+        ObservedPatternsService(bot=bot, ollama=ollama).regenerate()
 
-        # Create a success log
         create_log(
             bot=bot,
             is_success=True,
             desc=UPDATE_OBSERVED_PATTERNS_SUCCESS.format(bot_name=bot.name),
         )
 
-    except Exception as e:
-        logger.exception(
-            "regenerate_observed_patterns failed for bot %s", bot_id, exc_info=True
+    except Exception as exc:
+        bot_name = bot.name if bot is not None else "unknown"
+        description = GENERAL_TASK_ERROR.format(
+            func_name="regenerate_observed_patterns",
+            bot_name=bot_name,
+            error=str(exc),
         )
-
-        # Create an error log
-        create_log(
-            bot=bot,
-            is_success=False,
-            desc=GENERAL_TASK_ERROR.format(
-                func_name="regenerate_observed_patterns",
-                bot_name=bot.name,
-                error=str(e),
-            ),
+        log_task_failure(bot, description, "regenerate_observed_patterns failed")
+        raise self.retry(
+            exc=exc, countdown=RETRY_BASE_SECONDS * (2**self.request.retries)
         )
-
-        raise self.retry(exc=e, countdown=60 * (2**self.request.retries))

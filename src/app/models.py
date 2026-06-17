@@ -22,7 +22,7 @@ from pgvector.django import VectorField
 
 from app.choices import MCPTransportType, MessageRole
 from app.fields import EncryptedCharField, EncryptedJSONField
-from app.utils import get_token_hash
+from utils.crypto import get_token_hash
 from app.validators import (
     validate_cron_expression,
     validate_keep_alive,
