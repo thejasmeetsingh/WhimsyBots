@@ -86,11 +86,11 @@ class BotMessageProcessor:
                 )
             )
 
-        tools_configs = asyncio.run(
+        tools_config = asyncio.run(
             MCPToolsBuilder.build_tools_from_servers(mcp_server_list)
         )
 
-        return tools_configs
+        return tools_config
 
     def process_message(self, message: Message) -> tuple[str, Optional[int]]:
         """
