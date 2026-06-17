@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 from app.choices import MessageRole
 from app.models import Bot, Message
-from app.utils import parse_telegram_update
+from utils.telegram import parse_telegram_update
 from managers import TelegramClientManager
 
 logger = logging.getLogger(__name__)
