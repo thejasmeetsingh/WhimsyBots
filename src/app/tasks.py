@@ -669,7 +669,7 @@ def _resolve_single_embedding_target(
     message_id: Optional[str],
     cron_job_id: Optional[str],
     mcp_server_id: Optional[str],
-) -> Optional[tuple[str, str, Callable[[Ollama], Optional[Bot]]]]:
+) -> Optional[tuple[str, str, Callable[[Ollama], str]]]:
     """
     Validate the embedding request and return the dispatch function.
 
@@ -760,7 +760,7 @@ def generate_embedding(
         if ollama is None:
             return
 
-        bot = dispatch(ollama)
+        bot = dispatch(ollama, obj_id)
 
     except Exception as exc:
         logger.error("Generate embedding failed", exc_info=True)
