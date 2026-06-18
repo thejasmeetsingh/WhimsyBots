@@ -80,7 +80,7 @@ class ConversationSummaryService:
             return None
 
         summary_msg = (
-            self.bot.system_messages[0].content
+            self.bot.system_messages[0]
             if hasattr(self.bot, "system_messages") and self.bot.system_messages
             else None
         )

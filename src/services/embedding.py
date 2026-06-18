@@ -18,11 +18,11 @@ Note: Embedding generation delegates to OllamaClient.embed() — no direct HTTP 
 import asyncio
 import logging
 
-from pgvector.django import CosineDistance
 from django.utils import timezone
+from pgvector.django import CosineDistance
 
 from app.choices import MessageRole
-from app.models import Bot, MCPServer, Message, Ollama, CronJob
+from app.models import Bot, CronJob, MCPServer, Message, Ollama
 from clients.ollama import OllamaClient
 from services.tool_executor import MCPToolsBuilder
 
@@ -260,7 +260,7 @@ class EmbeddingService:
         """
 
         # Validate inputs early
-        if not query_vector or len(query_vector) != self.bot.embedding_dimensions:
+        if query_vector is None or (len(query_vector) != self.bot.embedding_dimensions):
             logger.warning(
                 "Invalid query vector dimensions (%d vs expected %d)",
                 len(query_vector),
