@@ -20,10 +20,10 @@ from sqlalchemy import column, select, table
 
 from pdf_generator.db import get_session
 from pdf_generator.helpers import (
-    parse_uuid,
     decrypt_token,
     extract_html,
     generate_pdf,
+    parse_uuid,
     send_document,
 )
 
