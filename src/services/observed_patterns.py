@@ -127,7 +127,7 @@ class ObservedPatternsService:
             MessageRole.ASSISTANT.value[0]: "Assistant",
         }
 
-        lines = []
+        lines: list[str] = []
         for msg in messages:
             if msg.role == MessageRole.SYSTEM.value[0]:
                 continue

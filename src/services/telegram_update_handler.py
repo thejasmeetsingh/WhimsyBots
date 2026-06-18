@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 from app.choices import MessageRole
 from app.models import Bot, Message
-from app.utils import parse_telegram_update
+from utils.telegram import parse_telegram_update
 from managers import TelegramClientManager
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class TelegramUpdateHandler:
         """
 
         # Import here to avoid circular dependencies (tasks.py imports this service)
-        from app.tasks import generate_embedding, process_inbound_message
+        from app.tasks import generate_embedding
 
         try:
             # Parse Telegram update
@@ -119,12 +119,6 @@ class TelegramUpdateHandler:
             # Send typing indicator (responsive UX)
             telegram_client = TelegramClientManager.create_client(bot)
             telegram_client.send_typing_action()
-
-            # Queue for processing on default worker
-            process_inbound_message.apply_async(
-                queue="default",
-                kwargs={"bot_id": str(bot.id), "msg_id": str(message.id)},
-            )
 
             # Generate embedding for user's message
             generate_embedding.apply_async(

@@ -3,7 +3,7 @@ import json
 from django import forms
 from django.db import models
 
-from app.utils import decrypt, encrypt
+from utils.crypto import decrypt, encrypt
 
 
 class EncryptedCharField(models.TextField):

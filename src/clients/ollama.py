@@ -5,7 +5,7 @@ Provides a high-level interface for interacting with Ollama, a local language mo
 Handles model listing, chat completions, and tool calling functionality.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 import ollama
 
@@ -37,9 +37,7 @@ class OllamaClient:
         >>> print(response["message"])  # Assistant response
     """
 
-    _client = None
-
-    def __init__(self, endpoint: str = None, api_key: str = None):
+    def __init__(self, endpoint: str, api_key: Optional[str] = None):
         """
         Initialize Ollama client.
 
@@ -109,18 +107,22 @@ class OllamaClient:
         """
 
         response = self._client.list()
-        models = list(map(lambda x: x.model, response.models))
+        models: list[str] = []
+
+        for model in response.models:
+            if model.model:
+                models.append(model.model)
+
         return models
 
     def chat(
         self,
         model: str,
-        messages: list[dict],
+        messages: list[dict[str, str]],
         keep_alive: Optional[str] = None,
-        tools: Optional[list[dict]] = None,
-        format: Optional[dict] = None,
-        options: Optional[dict] = None,
-    ) -> dict:
+        tools: Optional[list[dict[str, Any]]] = None,
+        options: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Send a chat message to Ollama and get a response.
 
@@ -133,8 +135,6 @@ class OllamaClient:
             keep_alive (str | None): Model keep-alive duration
             tools (list[dict] | None): Available tools for function calling
                 Format: Tool definitions in OpenAI function calling format
-            format (dict | None): Output format specification
-                For structured JSON responses, e.g., {"type": "string", "properties": {...}}
             options (dict | None): Model-specific options
                 Common options:
                 - "temperature" (float): 0.0-1.0, controls randomness
@@ -175,13 +175,6 @@ class OllamaClient:
             ... )
             >>> if response["tools"]:
             ...     print(f"Called tool: {response['tools'][0]['name']}")
-
-        Example - Structured output:
-            >>> response = client.chat(
-            ...     model='mistral',
-            ...     messages=[{"role": "user", "content": "Extract intent"}],
-            ...     format={"type": "string", "properties": {"intent": {"type": "string"}}}
-            ... )
         """
 
         if keep_alive:
@@ -193,7 +186,6 @@ class OllamaClient:
             messages=messages,
             keep_alive=keep_alive,
             tools=tools,
-            format=format,
             options=options,
         )
         message = response.message
@@ -206,7 +198,7 @@ class OllamaClient:
         if message.tool_calls:
             tools = list(map(lambda x: x["function"], message.tool_calls))
 
-        result = {
+        result: dict[str, Any] = {
             "message": message.content.strip(),
             "tools": tools,
             "ollama_ms": ollama_ms,

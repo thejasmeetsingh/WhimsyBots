@@ -1,13 +1,15 @@
 """Conversation Summary Service"""
 
+import asyncio
 import logging
 from typing import Optional
 
 from app.choices import MessageRole
-from app.models import Bot, Message, Ollama
+from app.models import Bot, MCPServer, Message, Ollama
 from clients.ollama import OllamaClient
 from prompts import SUMMARY_PROMPT
 from services.token_budget import TokenBudgetService
+from services.tool_executor import MCPToolsBuilder
 from strings import SUMMARY_UNAVAILABLE
 
 logger = logging.getLogger(__name__)
@@ -32,16 +34,32 @@ class ConversationSummaryService:
         bot: Bot,
         ollama: Ollama,
         ollama_client: OllamaClient,
-        tool_definitions: list[dict],
     ):
         self.bot = bot
         self.ollama = ollama
         self.ollama_client = ollama_client
 
+        self.history_token_budget = 0
+        self.summary_chars = 0
+
+    def _set_summary_budget(self):
+        # Build tools from servers
+        mcp_servers = getattr(self.bot, "mcp_servers_list", [])
+
+        # Add default mcp server's to the 'mcp_servers' list
+        default_servers = MCPServer.get_default_mcp_servers()
+        mcp_servers.extend(list(default_servers.values()))
+
+        tools_config = asyncio.run(
+            MCPToolsBuilder.build_tools_from_servers(mcp_servers)
+        )
+
         # Derive the history token budget the same way ContextAssembler does,
         # so the split point here is always consistent with what gets sent to
         # the LLM during message processing.
-        budget = TokenBudgetService.compute(ollama, tool_definitions)
+        budget = TokenBudgetService.compute(
+            self.ollama, [tool.tool for tool in tools_config]
+        )
         self.history_token_budget = budget.history_tokens
         self.summary_chars = budget.summary_chars
 
@@ -57,17 +75,20 @@ class ConversationSummaryService:
             (Message, created: bool) where Message has role='S', or None.
         """
 
-        # Fetch only messages in chronological order
-        messages = Message.objects.filter(bot_id=self.bot.id)
-        conversations = list(
-            messages.filter(
-                role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
-            )
+        conversations = getattr(self.bot, "conversations")
+        if not conversations:
+            return None
+
+        summary_msg = (
+            self.bot.system_messages[0]
+            if hasattr(self.bot, "system_messages") and self.bot.system_messages
+            else None
         )
-        summary_msg = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
 
         if not conversations:
             return None
+
+        self._set_summary_budget()
 
         in_window, overflowed = self._split_by_budget(conversations)
 

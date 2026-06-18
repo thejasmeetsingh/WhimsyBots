@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 from cryptography.fernet import Fernet
@@ -99,7 +99,7 @@ def extract_html(text: str) -> Optional[str]:
     return None
 
 
-def send_document(chat_id: str, token: str, file_bytes: bytes) -> dict:
+def send_document(chat_id: str, token: str, file_bytes: bytes) -> dict[str, Any]:
     """
     Send a document (file) to the chat.
     Sends binary file content as a Telegram document.
@@ -160,7 +160,7 @@ def decrypt_token(ciphertext: str) -> str:
     return fernet.decrypt(ciphertext.encode()).decode()
 
 
-def _parse_uuid(value: str, label: str) -> uuid.UUID | str:
+def parse_uuid(value: str, label: str) -> uuid.UUID | str:
     """
     Return a UUID object or an error string.
 

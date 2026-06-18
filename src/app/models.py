@@ -22,7 +22,7 @@ from pgvector.django import VectorField
 
 from app.choices import MCPTransportType, MessageRole
 from app.fields import EncryptedCharField, EncryptedJSONField
-from app.utils import get_token_hash
+from utils.crypto import get_token_hash
 from app.validators import (
     validate_cron_expression,
     validate_keep_alive,
@@ -204,6 +204,7 @@ class MCPServer(BaseModel):
     is_active = models.BooleanField(
         default=True, help_text="Whether this MCP server is active and should be used"
     )
+    tools_description_embedding = VectorField(null=True, blank=True)
 
     class Meta:
         ordering = ("-created_at",)
@@ -317,6 +318,8 @@ class CronJob(BaseModel):
         null=True, blank=True, help_text="Timestamp of last execution"
     )
     is_active = models.BooleanField(default=True)
+    schedule_embedding = VectorField(null=True, blank=True)
+    schedule_embedding_updated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("-created_at",)

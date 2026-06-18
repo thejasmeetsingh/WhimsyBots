@@ -20,10 +20,10 @@ from sqlalchemy import column, select, table
 
 from pdf_generator.db import get_session
 from pdf_generator.helpers import (
-    _parse_uuid,
     decrypt_token,
     extract_html,
     generate_pdf,
+    parse_uuid,
     send_document,
 )
 
@@ -80,7 +80,7 @@ async def generate_and_send_report(bot_id: str, contents: str) -> str:
         }
     )
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
@@ -103,7 +103,7 @@ async def generate_and_send_report(bot_id: str, contents: str) -> str:
 
             if row is None:
                 logger.error("Bot record with the given 'bot_id' does not exists")
-                return bot_uuid
+                return str(bot_uuid)
 
             bot_data = row._asdict()
             token = decrypt_token(bot_data["telegram_bot_token"])

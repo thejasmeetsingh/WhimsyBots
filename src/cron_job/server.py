@@ -22,69 +22,25 @@ Example MCP Usage:
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from cron_job.db import get_session
-from cron_job.helpers import (_calc_next_run, _fmt_job, _fmt_jobs, _parse_uuid,
-                              _validate_cron)
+from cron_job.helpers import (
+    calc_next_run,
+    fmt_job,
+    fmt_jobs,
+    parse_uuid,
+    validate_cron,
+)
 from cron_job.models import CronJob
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP(
-    name="cron-job-manager",
-    instructions="""
-You are connected to a Cron Job Manager MCP server that allows you to manage scheduled cron jobs stored in a PostgreSQL database. Each cron job belongs to a bot and defines when that bot should execute using standard cron expressions.
-
-## Available Tools
-
-### 1. `list_cron_jobs`
-Retrieves cron jobs for a given bot. Use this when the user wants to see, browse, or check existing cron jobs.
-- `bot_id` (required): The UUID of the bot.
-- `is_active` (optional): Pass `true` for active jobs only, `false` for inactive jobs only. Omit to return all.
-
-### 2. `create_cron_job`
-Creates a new cron job for a bot. Use this when the user wants to schedule a new job.
-- `bot_id` (required): The UUID of the bot.
-- `name` (required): A short, human-readable label (max 100 characters).
-- `description` (required): A detailed description of what the job does (max 5000 characters).
-- `cron_expression` (required): A valid standard 5-field cron expression (e.g. `0 9 * * 1` for every Monday at 9 AM).
-
-### 3. `update_cron_job`
-Partially updates an existing cron job. Only the fields you provide will be changed — unspecified fields remain untouched.
-- `id` (required): UUID of the cron job to update.
-- `bot_id` (required): UUID of the owning bot, used to scope the lookup.
-- `name` (optional): New label for the job.
-- `description` (optional): New description for the job.
-- `cron_expression` (optional): New cron schedule. Will be validated and `next_run_at` will be recalculated automatically.
-- `is_active` (optional): Pass `true` to enable or `false` to disable the job.
-
-### 4. `delete_cron_job`
-Permanently deletes a cron job. This action is irreversible.
-- `id` (required): UUID of the cron job to delete.
-- `bot_id` (required): UUID of the owning bot, used to scope the deletion.
-
-## Response Format
-All tools return a Markdown-formatted response containing:
-- **ID** — UUID of the cron job
-- **Bot ID** — UUID of the owning bot
-- **Name** — Label of the job
-- **Description** — What the job does
-- **Cron Expression** — The schedule in cron format
-
-Errors (invalid UUIDs, invalid cron expressions, not found, or database failures) are also returned as Markdown with a clear heading indicating the error type.
-
-## Important Rules
-- Never guess or fabricate UUIDs. Always use exact values provided by the user.
-- When creating or updating a job, validate that the cron expression follows the standard 5-field format: `minute hour day-of-month month day-of-week`.
-- Prefer `update_cron_job` with `is_active: false` over deletion when the user wants to temporarily pause a job.
-- If the user asks to "disable" or "pause" a job, use `update_cron_job` with `is_active: false` — do not delete it.
-""",
-)
+mcp = FastMCP(name="cron-job-manager")
 
 
 @mcp.tool()
@@ -130,7 +86,7 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
         }
     )
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
@@ -146,7 +102,7 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
             jobs = result.scalars().all()
 
         status_label = {True: "Active", False: "Inactive", None: "All"}[is_active]
-        return _fmt_jobs(jobs, f"Cron Jobs — Bot `{bot_id}` ({status_label})")
+        return fmt_jobs(jobs, f"Cron Jobs — Bot `{bot_id}` ({status_label})")
     except SQLAlchemyError as e:
         return f"## Database Error\n\n```\n{e}\n```"
 
@@ -200,13 +156,13 @@ async def create_cron_job(
         }
     )
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     try:
-        _validate_cron(cron_expression)
+        validate_cron(cron_expression)
     except ValueError as e:
         return f"## Validation Error\n\n{e}"
 
@@ -218,14 +174,14 @@ async def create_cron_job(
                 name=name,
                 description=description,
                 cron_expression=cron_expression,
-                next_run_at=_calc_next_run(cron_expression),
+                next_run_at=calc_next_run(cron_expression),
                 is_active=True,
             )
             session.add(job)
             await session.commit()
             await session.refresh(job)
 
-        return "## ✅ Cron Job Created\n\n" + _fmt_job(job)
+        return "## ✅ Cron Job Created\n\n" + fmt_job(job)
     except SQLAlchemyError as e:
         return f"## Database Error\n\n```\n{e}\n```"
 
@@ -292,24 +248,24 @@ async def update_cron_job(
         }
     )
 
-    job_uuid = _parse_uuid(id, "id")
+    job_uuid = parse_uuid(id, "id")
     if isinstance(job_uuid, str):
         logger.error("Invalid 'job_uuid' format")
         return job_uuid
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
 
     if cron_expression is not None:
         try:
-            _validate_cron(cron_expression)
+            validate_cron(cron_expression)
         except ValueError as e:
             return f"## Validation Error\n\n{e}"
 
     # Build only the fields that were actually provided
-    changes: dict = {"updated_at": datetime.now(timezone.utc)}
+    changes: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
     if name is not None:
         changes["name"] = name
     if description is not None:
@@ -318,7 +274,7 @@ async def update_cron_job(
         changes["is_active"] = is_active
     if cron_expression is not None:
         changes["cron_expression"] = cron_expression
-        changes["next_run_at"] = _calc_next_run(cron_expression)
+        changes["next_run_at"] = calc_next_run(cron_expression)
 
     try:
         async with get_session() as session:
@@ -342,7 +298,7 @@ async def update_cron_job(
             await session.commit()
             await session.refresh(job)
 
-        return "## ✅ Cron Job Updated\n\n" + _fmt_job(job)
+        return "## ✅ Cron Job Updated\n\n" + fmt_job(job)
     except SQLAlchemyError as e:
         return f"## Database Error\n\n```\n{e}\n```"
 
@@ -386,12 +342,12 @@ async def delete_cron_job(id: str, bot_id: str) -> str:
         }
     )
 
-    job_uuid = _parse_uuid(id, "id")
+    job_uuid = parse_uuid(id, "id")
     if isinstance(job_uuid, str):
         logger.error("Invalid 'job_uuid' format")
         return job_uuid
 
-    bot_uuid = _parse_uuid(bot_id, "bot_id")
+    bot_uuid = parse_uuid(bot_id, "bot_id")
     if isinstance(bot_uuid, str):
         logger.error("Invalid 'bot_uuid' format")
         return bot_uuid
@@ -409,7 +365,7 @@ async def delete_cron_job(id: str, bot_id: str) -> str:
             if job is None:
                 return f"## Not Found\n\nNo cron job with ID `{id}` found for bot `{bot_id}`."
 
-            snapshot_md = _fmt_job(job)  # capture before delete
+            snapshot_md = fmt_job(job)  # capture before delete
             await session.delete(job)
             await session.commit()
 

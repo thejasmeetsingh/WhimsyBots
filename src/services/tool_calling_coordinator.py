@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from app.models import Ollama
 from clients import OllamaClient
-from services.tool_executor import ToolExecutor
+from services.tool_executor import MCPToolConfig, ToolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +14,9 @@ def run_tool_calling_loop(
     ollama_client: OllamaClient,
     model: str,
     history: list[dict[str, Any]],
-    tools_config: list,
+    tools_config: list[MCPToolConfig],
     ollama: Ollama,
     add_keep_alive: bool = False,
-    format: Optional[dict] = None,
 ) -> tuple[str, Optional[int]]:
     """
     Execute the tool calling loop with Ollama and MCP tools.
@@ -48,7 +47,6 @@ def run_tool_calling_loop(
                 messages=history,
                 keep_alive=ollama.keep_alive if add_keep_alive else None,
                 tools=[tool.tool for tool in tools_config],
-                format=format,
                 options={
                     "temperature": ollama.temperature,
                     "num_ctx": ollama.num_ctx,

@@ -6,7 +6,7 @@ Handles tool discovery and execution with automatic cleanup.
 """
 
 from contextlib import AsyncExitStack
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import httpx
 from mcp import ClientSession, StdioServerParameters
@@ -58,7 +58,7 @@ class MCPClient:
         >>> await client.cleanup()
     """
 
-    def __init__(self, transport_type: str, config: Dict[str, Any]) -> None:
+    def __init__(self, transport_type: str, config: dict[str, Any]) -> None:
         """
         Initialize MCP client.
 
@@ -125,9 +125,9 @@ class MCPClient:
         self._session = session
         return self._session
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         """
-        List all available tools from the MCP server.
+        list all available tools from the MCP server.
 
         Queries the connected MCP server for available tools and converts
         them to Ollama-compatible function format for use in chat completions.
@@ -163,7 +163,7 @@ class MCPClient:
         session = await self._connect()
         response = await session.list_tools()
 
-        tools = []
+        tools: list[dict[str, Any]] = []
 
         # Convert MCP tool format to Ollama-compatible format
         for tool in response.tools:
@@ -186,8 +186,8 @@ class MCPClient:
         return tools
 
     async def execute_tool(
-        self, name: str, arguments: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, name: str, arguments: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """
         Execute a tool on the MCP server.
 
@@ -251,9 +251,9 @@ class MCPClient:
 
 async def mcp_client(
     transport_type: str,
-    config: Dict[str, Any],
-    payload: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any] | List[Dict[str, Any]]:
+    config: dict[str, Any],
+    payload: Optional[dict[str, Any]] = None,
+) -> dict[str, Any] | list[dict[str, Any]]:
     """
     Convenience async function for single MCP server operations.
 
@@ -270,13 +270,13 @@ async def mcp_client(
     Returns:
         dict | list: Tool execution result or tool list
 
-    Example - List tools:
+    Example - list tools:
         >>> tools = await mcp_client('L', {
         ...     'command': 'python',
         ...     'args': ['-m', 'memory_server'],
         ...     'env': {}
         ... })
-        >>> print(tools)  # List of tools
+        >>> print(tools)  # list of tools
 
     Example - Execute tool:
         >>> result = await mcp_client('L', config, {
@@ -297,7 +297,7 @@ async def mcp_client(
             # Execute tool with arguments
             response = await client.execute_tool(**payload)
         else:
-            # List available tools
+            # list available tools
             response = await client.list_tools()
 
         return response

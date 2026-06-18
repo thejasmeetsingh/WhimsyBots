@@ -16,17 +16,16 @@ the system prompt), with oldest messages dropped first when budget is tight.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from django.conf import settings
 from pydantic import BaseModel
 
 from app.choices import MessageRole
 from app.models import Bot, Message, Ollama
-from app.utils import convert_messages_to_ollama_format
+from utils.formatting import convert_messages_to_ollama_format
 from prompts import DEFAULT_SYSTEM_PROMPT
 from services.embedding import EmbeddingService
-from services.skills_registry import SkillsRegistry
 from services.token_budget import TokenBudget, TokenBudgetService
 from strings import SUMMARY_UNAVAILABLE
 
@@ -41,7 +40,7 @@ RECENT_MESSAGES_CAP: int = 200
 
 class AssembledContext(BaseModel):
     history: list[
-        dict
+        dict[str, str]
     ]  # Ollama-formatted message dicts [{"role": ..., "content": ...}]
     budget: TokenBudget  # Carried through for logging / debugging
 
@@ -63,8 +62,7 @@ class ContextAssembler:
 
     def assemble(
         self,
-        tool_definitions: list[dict],
-        active_mcp_server_names: list[str],
+        tool_definitions: list[dict[str, Any]],
     ) -> AssembledContext:
         """
         Full pipeline:
@@ -77,10 +75,12 @@ class ContextAssembler:
         # Fetch messages
         messages = Message.objects.filter(bot_id=self.bot.id)
 
+        # Filter only conversational messages using the same messages QuerySet
         conversations = messages.filter(
             role__in=[MessageRole.USER.value[0], MessageRole.ASSISTANT.value[0]]
         )[:RECENT_MESSAGES_CAP]  # hard cap: never scan more than 200 messages
 
+        # Retreive summary (if available) using the same messages QuerySet
         summary = messages.filter(role=MessageRole.SYSTEM.value[0]).first()
         summary_msg = summary.content if summary else SUMMARY_UNAVAILABLE
 
@@ -92,6 +92,8 @@ class ContextAssembler:
         raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
             system_prompt=self.bot.system_prompt or "You are a helpful assistant",
             summary=summary_msg,
+            bot_id=str(self.bot.id),
+            timezone=settings.TIME_ZONE,
         )
 
         fitted_system_prompt = TokenBudgetService.truncate_text(
@@ -105,13 +107,6 @@ class ContextAssembler:
                 budget.system_prompt_chars,
             )
 
-        # Skills — static, always fits, no truncation needed
-        skills_block = SkillsRegistry.get_skills_block(
-            active_mcp_server_names,
-            bot_id=str(self.bot.id),
-            timezone=settings.TIME_ZONE,
-        )
-
         # Observed patterns — generated async, stored on bot, always protected
         patterns_block = self._fit_patterns(budget)
 
@@ -123,13 +118,10 @@ class ContextAssembler:
         )
 
         # 3. Assemble system prompt
-        sections = []
+        sections: list[str] = []
 
         if fitted_system_prompt:
             sections.append(fitted_system_prompt)
-
-        if skills_block:
-            sections.append(skills_block)
 
         if patterns_block:
             sections.append(patterns_block)
@@ -140,7 +132,7 @@ class ContextAssembler:
         system_prompt = SECTION_SEP.join(sections)
 
         # 4. Fit conversation history
-        history = self._fit_history(
+        history: list[dict[str, str]] = self._fit_history(
             budget, messages=conversations, system_prompt=system_prompt
         )
 
@@ -169,7 +161,7 @@ class ContextAssembler:
     def _fit_memories(
         self,
         budget: TokenBudget,
-        top_k: Optional[int] = 5,
+        top_k: int = 5,
     ) -> str:
         """
         Retrieve top-k semantically similar past USER messages, then drop
@@ -182,7 +174,7 @@ class ContextAssembler:
         # Returns list of (Message, similarity_score) sorted by score desc
         embedding_svc = EmbeddingService(self.bot, self.ollama)
         raw_memories = embedding_svc.get_relevant_memories(
-            query_text=self.current_message.content,
+            query_vector=self.current_message.content_embedding,
             current_message_id=str(self.current_message.id),
             top_k=top_k,
         )
@@ -213,7 +205,7 @@ class ContextAssembler:
         budget: TokenBudget,
         messages: list[Message],
         system_prompt: Optional[str] = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, str]]:
         """
         Walk newest→oldest for the given messages, keep until history_tokens budget is exhausted.
         Returns Ollama-formatted dicts in chronological order.

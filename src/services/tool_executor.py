@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from app.choices import MCPTransportType
+from app.models import MCPServer
 from clients import mcp_client
 from strings import INVALID_TOOL, TOOL_EXECUTION_FAILED
 
@@ -34,7 +35,9 @@ class MCPToolsBuilder:
     """Service for building and configuring MCP tools"""
 
     @staticmethod
-    async def build_tools_from_servers(mcp_servers) -> List[MCPToolConfig]:
+    async def build_tools_from_servers(
+        mcp_servers: list[MCPServer],
+    ) -> List[MCPToolConfig]:
         """
         Build MCPToolConfig instances from bot MCP servers.
 
@@ -45,7 +48,7 @@ class MCPToolsBuilder:
             List of MCPToolConfig instances
         """
 
-        tools = []
+        tools: list[MCPToolConfig] = []
 
         for server in mcp_servers:
             config = MCPToolsBuilder._build_server_config(server)
@@ -69,7 +72,7 @@ class MCPToolsBuilder:
         return tools
 
     @staticmethod
-    def _build_server_config(server) -> Dict[str, Any]:
+    def _build_server_config(server: MCPServer) -> Dict[str, Any]:
         """Build configuration dictionary from MCP server"""
 
         if server.transport == MCPTransportType.LOCAL.value[0]:
@@ -82,7 +85,7 @@ class MCPToolsBuilder:
             return {"url": server.endpoint, "headers": server.secrets}
 
     @staticmethod
-    def _get_transport_type(server) -> str:
+    def _get_transport_type(server: MCPServer) -> str:
         """Get transport type from server"""
 
         return server.transport

@@ -3,9 +3,10 @@ from typing import Optional
 
 from django import forms
 from django.core.cache import cache
+from pydantic import BaseModel
 
 from app.models import Bot, MCPServer, Ollama
-from app.utils import get_token_hash
+from utils.crypto import get_token_hash
 from clients import OllamaClient
 from strings import UNIQUE_TELEGRAM_TOKEN_ERROR
 
@@ -19,9 +20,14 @@ MODEL_DATA_CACHE_KEY = "ollama_models_data"
 MODEL_DATA_CACHE_TIMEOUT = 3600  # 1 hour
 
 
+class Model(BaseModel):
+    model: str
+    is_embedding: bool
+
+
 def fetch_ollama_models_with_capabilities(
-    endpoint: Optional[str] = None, api_key: Optional[str] = None
-) -> list[dict[str, str | bool]]:
+    endpoint: str, api_key: Optional[str]
+) -> list[Model]:
     """
     Fetch available models from Ollama client with their capabilities.
 
@@ -37,7 +43,7 @@ def fetch_ollama_models_with_capabilities(
     """
 
     try:
-        result = []
+        result: list[Model] = []
         client = OllamaClient(endpoint=endpoint, api_key=api_key)
         models = client.list_models()
 
@@ -46,7 +52,7 @@ def fetch_ollama_models_with_capabilities(
                 capabilities = client.fetch_model_capabilities(model)
                 if "tools" in capabilities or "embedding" in capabilities:
                     result.append(
-                        {"model": model, "is_embedding": "embedding" in capabilities}
+                        Model(model=model, is_embedding="embedding" in capabilities)
                     )
             except Exception as _:
                 logger.info(
@@ -62,7 +68,7 @@ def fetch_ollama_models_with_capabilities(
         return []
 
 
-def get_models_from_cache() -> Optional[list[dict[str, str | bool]]]:
+def get_models_from_cache() -> Optional[list[Model]]:
     """
     Retrieve models data from Redis cache.
 
@@ -75,14 +81,15 @@ def get_models_from_cache() -> Optional[list[dict[str, str | bool]]]:
 
     try:
         cached_data = cache.get(MODEL_DATA_CACHE_KEY)
-        return cached_data
+        models = list(map(lambda _model: Model.model_validate(_model), cached_data))
+        return models
     except Exception as _:
         logger.error("Failed to retrieve models from cache", exc_info=True)
         return None
 
 
 def save_models_to_cache(
-    models_data: list[dict[str, str | bool]],
+    models_data: list[Model],
 ) -> bool:
     """
     Save models data to Redis cache.
@@ -98,7 +105,8 @@ def save_models_to_cache(
     """
 
     try:
-        cache.set(MODEL_DATA_CACHE_KEY, models_data, MODEL_DATA_CACHE_TIMEOUT)
+        models = list(map(lambda _model: _model.model_dump(), models_data))
+        cache.set(MODEL_DATA_CACHE_KEY, models, MODEL_DATA_CACHE_TIMEOUT)
         return True
     except Exception as _:
         logger.error("Failed to save models to cache", exc_info=True)
@@ -106,7 +114,7 @@ def save_models_to_cache(
 
 
 def get_filtered_models(
-    models: list[dict[str, str | bool]], is_embedding: bool
+    models: list[Model], is_embedding: bool
 ) -> list[tuple[str, str]]:
     """
     Convert models data to choices format
@@ -119,11 +127,13 @@ def get_filtered_models(
         list of tuples of model names
     """
 
-    return [
-        (model["model"], model["model"])
+    _models = [
+        (model.model, model.model)
         for model in models
-        if model["is_embedding"] == is_embedding
+        if model.is_embedding == is_embedding
     ]
+
+    return _models
 
 
 class BotForm(forms.ModelForm):
@@ -196,6 +206,9 @@ class BotForm(forms.ModelForm):
 
         endpoint = getattr(ollama_obj, "endpoint", None)
         api_key = getattr(ollama_obj, "api_key", None)
+
+        if not endpoint:
+            return
 
         # Try to get models from cache first
         models = get_models_from_cache()
