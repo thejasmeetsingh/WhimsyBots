@@ -43,7 +43,7 @@ COPY . .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    DJANGO_SETTINGS_MODULE=whimsybots.settings
+    DJANGO_SETTINGS_MODULE=whimsybots.settings.base
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
