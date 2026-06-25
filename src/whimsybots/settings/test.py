@@ -1,6 +1,15 @@
 from whimsybots.settings.base import *  # noqa
 
 # ──────────────────────────────────────────────
+# Secret key – the base settings pull SECRET_KEY from the environment,
+# which is unset in CI / local dev. Anything that touches
+# django.conf.settings (e.g. utils.crypto.get_fernet) needs a
+# non-empty key. The value is constant per test run so deterministic
+# helpers like get_token_hash remain stable.
+# ──────────────────────────────────────────────
+SECRET_KEY = "test-secret-key-for-unit-tests-only"
+
+# ──────────────────────────────────────────────
 # Database – SQLite with PostgreSQL field shims
 # ──────────────────────────────────────────────
 DATABASES = {
