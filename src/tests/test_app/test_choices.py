@@ -1,4 +1,4 @@
-"""Tests for `src/app/choices.py` (Tier 1 — pure logic)."""
+"""Tests for `src/app/choices.py`."""
 
 from __future__ import annotations
 
@@ -6,14 +6,13 @@ import pytest
 
 from app.choices import MCPTransportType, MessageRole
 
-
 # ──────────────────────────────────────────────
 # BaseChoices.get_values
 # ──────────────────────────────────────────────
 
 
 def test_message_role_get_values_returns_all_value_tuples():
-    # `get_values` returns the full `(code, label)` tuples — Django's
+    # 'get_values' returns the full '(code, label)' tuples — Django's
     # choices field can consume either bare codes or (code, label) tuples,
     # and the implementation uses the latter for richer admin display.
     assert MessageRole.get_values() == (

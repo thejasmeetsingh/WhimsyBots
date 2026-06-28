@@ -1,4 +1,4 @@
-"""Tests for `src/cron_job/helpers.py` (Tier 6 — pure logic).
+"""Tests for 'src/cron_job/helpers.py'.
 
 These helpers are pure utility functions: cron validation, next-run
 calculation, UUID parsing, and markdown formatting for CronJob rows.
@@ -20,7 +20,6 @@ from cron_job.helpers import (
     parse_uuid,
     validate_cron,
 )
-
 
 # ──────────────────────────────────────────────
 # validate_cron
@@ -193,7 +192,7 @@ def test_fmt_jobs_each_job_rendered():
 
 
 def test_fmt_jobs_preserves_order():
-    """`fmt_jobs` should render jobs in the order they're passed in."""
+    """'fmt_jobs' should render jobs in the order they're passed in."""
 
     jobs = [
         _job_dict(name="First"),

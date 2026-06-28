@@ -51,3 +51,12 @@ jobs:
           DJANGO_SETTINGS_MODULE: whimsybots.settings.test
           SECRET_KEY: ci-secret-key
         run: pytest -v --maxfail=1 --tb=short
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint (non-blocking)
+        # Reports docstring + style violations but does not fail the build
+        # on the first rollout — gives the codebase time to converge on the
+        # style documented in docs/DOCSTRING_STYLE.md.
+        run: ruff check src/ || true

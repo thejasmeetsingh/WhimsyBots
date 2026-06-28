@@ -1,4 +1,4 @@
-"""Tests for `src/services/context_assembler.py` (Tier 3).
+"""Tests for 'src/services/context_assembler.py'.
 
 ContextAssembler queries the ORM, computes a token budget, and joins
 four context sources (system prompt, observed patterns, relevant
@@ -13,16 +13,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-from services.token_budget import TokenBudget
 from services.context_assembler import (
-    AssembledContext,
-    ContextAssembler,
     RECENT_MESSAGES_CAP,
     SECTION_SEP,
+    AssembledContext,
+    ContextAssembler,
 )
+from services.token_budget import TokenBudget
 from strings import SUMMARY_UNAVAILABLE
-
 
 # ──────────────────────────────────────────────
 # helpers — fake message ORM objects
@@ -58,9 +56,7 @@ def _bot(
 
 
 def _ollama(num_ctx=8192, num_predict=None, temperature=0.7):
-    return SimpleNamespace(
-        num_ctx=num_ctx, num_predict=num_predict, temperature=temperature
-    )
+    return SimpleNamespace(num_ctx=num_ctx, num_predict=num_predict, temperature=temperature)
 
 
 # ──────────────────────────────────────────────
@@ -171,7 +167,7 @@ def test_assemble_returns_assembled_context_dataclass():
             side_effect=lambda text, limit, suffix="…": (
                 text[: limit - len(suffix)] + suffix if len(text) > limit else text
             ),
-        ) as budget_svc,
+        ),
         patch("services.context_assembler.TokenBudgetService.compute") as compute_mock,
         patch("services.context_assembler.EmbeddingService"),
     ):
@@ -183,9 +179,7 @@ def test_assemble_returns_assembled_context_dataclass():
             history_tokens=1_000,
             recommended_tool_count=0,
         )
-        result = ContextAssembler(bot, _ollama(), current_msg).assemble(
-            tool_definitions=[]
-        )
+        result = ContextAssembler(bot, _ollama(), current_msg).assemble(tool_definitions=[])
 
     assert isinstance(result, AssembledContext)
     assert result.budget is compute_mock.return_value
@@ -203,7 +197,7 @@ def test_assemble_includes_system_prompt_when_present():
             side_effect=lambda text, limit, suffix="…": (
                 text[: limit - len(suffix)] + suffix if len(text) > limit else text
             ),
-        ) as budget_svc,
+        ),
         patch("services.context_assembler.TokenBudgetService.compute") as compute_mock,
         patch("services.context_assembler.EmbeddingService"),
     ):
@@ -215,9 +209,7 @@ def test_assemble_includes_system_prompt_when_present():
             history_tokens=1_000,
             recommended_tool_count=0,
         )
-        result = ContextAssembler(bot, _ollama(), current_msg).assemble(
-            tool_definitions=[]
-        )
+        result = ContextAssembler(bot, _ollama(), current_msg).assemble(tool_definitions=[])
 
     # system_prompt tokens make it into the history as the first item.
     assert "Be terse." in result.history[0]["content"]
@@ -235,7 +227,7 @@ def test_assemble_skips_patterns_section_when_bot_has_none():
             side_effect=lambda text, limit, suffix="…": (
                 text[: limit - len(suffix)] + suffix if len(text) > limit else text
             ),
-        ) as budget_svc,
+        ),
         patch("services.context_assembler.TokenBudgetService.compute") as compute_mock,
         patch("services.context_assembler.EmbeddingService"),
     ):
@@ -247,9 +239,7 @@ def test_assemble_skips_patterns_section_when_bot_has_none():
             history_tokens=1_000,
             recommended_tool_count=0,
         )
-        result = ContextAssembler(bot, _ollama(), current_msg).assemble(
-            tool_definitions=[]
-        )
+        result = ContextAssembler(bot, _ollama(), current_msg).assemble(tool_definitions=[])
 
     full_text = SECTION_SEP.join(s["content"] for s in result.history)
     assert "Observed User Patterns" not in full_text
@@ -267,7 +257,7 @@ def test_assemble_includes_patterns_section_when_present():
             side_effect=lambda text, limit, suffix="…": (
                 text[: limit - len(suffix)] + suffix if len(text) > limit else text
             ),
-        ) as budget_svc,
+        ),
         patch("services.context_assembler.TokenBudgetService.compute") as compute_mock,
         patch("services.context_assembler.EmbeddingService"),
     ):
@@ -279,9 +269,7 @@ def test_assemble_includes_patterns_section_when_present():
             history_tokens=1_000,
             recommended_tool_count=0,
         )
-        result = ContextAssembler(bot, _ollama(), current_msg).assemble(
-            tool_definitions=[]
-        )
+        result = ContextAssembler(bot, _ollama(), current_msg).assemble(tool_definitions=[])
 
     full_text = SECTION_SEP.join(s["content"] for s in result.history)
     assert "user prefers bullet points" in full_text
@@ -299,7 +287,7 @@ def test_assemble_uses_summary_unavailable_when_no_system_message():
             side_effect=lambda text, limit, suffix="…": (
                 text[: limit - len(suffix)] + suffix if len(text) > limit else text
             ),
-        ) as budget_svc,
+        ),
         patch("services.context_assembler.TokenBudgetService.compute") as compute_mock,
         patch("services.context_assembler.EmbeddingService"),
     ):
@@ -311,9 +299,7 @@ def test_assemble_uses_summary_unavailable_when_no_system_message():
             history_tokens=1_000,
             recommended_tool_count=0,
         )
-        result = ContextAssembler(bot, _ollama(), current_msg).assemble(
-            tool_definitions=[]
-        )
+        result = ContextAssembler(bot, _ollama(), current_msg).assemble(tool_definitions=[])
 
     assert SUMMARY_UNAVAILABLE in result.history[0]["content"]
 
@@ -350,9 +336,7 @@ def test_assemble_truncates_system_prompt_when_over_budget(caplog):
         budget_svc.truncate_text.side_effect = lambda text, limit, suffix="…": (
             text[: limit - len(suffix)] + suffix if len(text) > limit else text
         )
-        result = ContextAssembler(bot, _ollama(), current_msg).assemble(
-            tool_definitions=[]
-        )
+        result = ContextAssembler(bot, _ollama(), current_msg).assemble(tool_definitions=[])
 
     assert any("truncated" in r.message.lower() for r in caplog.records)
     # The assembled prompt carries the suffix ⇒ truncation occurred.
@@ -376,7 +360,7 @@ def test_assemble_skips_memories_when_current_message_has_no_embedding():
             side_effect=lambda text, limit, suffix="…": (
                 text[: limit - len(suffix)] + suffix if len(text) > limit else text
             ),
-        ) as budget_svc,
+        ),
         patch("services.context_assembler.TokenBudgetService.compute") as compute_mock,
         patch("services.context_assembler.EmbeddingService") as emb_cls,
     ):
@@ -406,7 +390,7 @@ def test_assemble_includes_memories_when_embedding_present():
             side_effect=lambda text, limit, suffix="…": (
                 text[: limit - len(suffix)] + suffix if len(text) > limit else text
             ),
-        ) as budget_svc,
+        ),
         patch("services.context_assembler.TokenBudgetService.compute") as compute_mock,
         patch("services.context_assembler.EmbeddingService") as emb_cls,
     ):
@@ -418,12 +402,8 @@ def test_assemble_includes_memories_when_embedding_present():
             history_tokens=1_000,
             recommended_tool_count=0,
         )
-        emb_cls.return_value.get_relevant_memories.return_value = [
-            (_msg("U", "past fact"), 0.9)
-        ]
-        result = ContextAssembler(bot, _ollama(), current_msg).assemble(
-            tool_definitions=[]
-        )
+        emb_cls.return_value.get_relevant_memories.return_value = [(_msg("U", "past fact"), 0.9)]
+        result = ContextAssembler(bot, _ollama(), current_msg).assemble(tool_definitions=[])
 
     # Relevant Past Context section is present.
     full_text = SECTION_SEP.join(s["content"] for s in result.history)

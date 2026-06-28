@@ -1,11 +1,11 @@
-"""Tests for `src/pdf_generator/helpers.py` (Tier 6 — pure logic + light IO).
+"""Tests for 'src/pdf_generator/helpers.py'.
 
 We focus on:
-- `extract_html` — 4-step regex extraction logic
-- `parse_uuid` — dual-return contract
-- `decrypt_token` — round-trip + missing SECRET_KEY
-- `generate_pdf` — happy path passes bytes through
-- `send_document` — Telegram sendDocument wiring
+- 'extract_html' — 4-step regex extraction logic
+- 'parse_uuid' — dual-return contract
+- 'decrypt_token' — round-trip + missing SECRET_KEY
+- 'generate_pdf' — happy path passes bytes through
+- 'send_document' — Telegram sendDocument wiring
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from pdf_generator.helpers import (
     parse_uuid,
     send_document,
 )
-
 
 # ──────────────────────────────────────────────
 # extract_html
@@ -149,7 +148,7 @@ def test_parse_uuid_returns_error_string_on_invalid_input():
 
 def _encrypt_with_secret(plaintext: str, secret: str) -> str:
     """Helper: Fernet-encrypt a plaintext using the same key derivation
-    that `decrypt_token` uses."""
+    that 'decrypt_token' uses."""
 
     key = hashlib.sha256(secret.encode()).digest()
     encoded_key = base64.urlsafe_b64encode(key)
@@ -157,7 +156,7 @@ def _encrypt_with_secret(plaintext: str, secret: str) -> str:
 
 
 def test_decrypt_token_round_trip():
-    """`decrypt_token` must recover the original plaintext from a Fernet
+    """'decrypt_token' must recover the original plaintext from a Fernet
     ciphertext encrypted with the same SECRET_KEY."""
 
     secret = "shhh"
@@ -167,7 +166,7 @@ def test_decrypt_token_round_trip():
 
 
 def test_decrypt_token_raises_when_secret_key_missing(monkeypatch):
-    """`decrypt_token` requires the `SECRET_KEY` env var to be set."""
+    """'decrypt_token' requires the 'SECRET_KEY' env var to be set."""
 
     monkeypatch.delenv("SECRET_KEY", raising=False)
     ciphertext = _encrypt_with_secret("x", "anything")
@@ -190,10 +189,10 @@ def test_decrypt_token_raises_on_wrong_secret_key():
 
 
 def test_generate_pdf_returns_bytes():
-    """`generate_pdf` must return whatever bytes WeasyPrint writes.
+    """'generate_pdf' must return whatever bytes WeasyPrint writes.
 
     On systems without the native WeasyPrint dependencies, the
-    `conftest.py` stubs the `weasyprint` module. We patch
+    'conftest.py' stubs the 'weasyprint' module. We patch
     `pdf_generator.helpers.HTML` to a deterministic fake that writes
     recognizable bytes — preserving the contract under test without
     requiring native libs.
@@ -222,7 +221,7 @@ def test_generate_pdf_returns_bytes():
 
 
 def test_generate_pdf_propagates_weasyprint_errors():
-    """If weasyprint raises, `generate_pdf` re-raises."""
+    """If weasyprint raises, 'generate_pdf' re-raises."""
 
     with patch("pdf_generator.helpers.HTML") as HTMLCls:
         HTMLCls.return_value.write_pdf.side_effect = RuntimeError("weasyprint boom")
@@ -236,7 +235,7 @@ def test_generate_pdf_propagates_weasyprint_errors():
 
 
 def test_send_document_posts_to_telegram_and_returns_result():
-    """`send_document` must POST the file bytes and return the `result` payload."""
+    """'send_document' must POST the file bytes and return the 'result' payload."""
 
     fake_response = MagicMock()
     fake_response.status_code = 200
@@ -245,9 +244,7 @@ def test_send_document_posts_to_telegram_and_returns_result():
         "result": {"message_id": 1, "document": {"file_id": "abc"}},
     }
 
-    with patch(
-        "pdf_generator.helpers.requests.post", return_value=fake_response
-    ) as post:
+    with patch("pdf_generator.helpers.requests.post", return_value=fake_response) as post:
         result = send_document(
             chat_id="999",
             token="TOK",
@@ -259,7 +256,7 @@ def test_send_document_posts_to_telegram_and_returns_result():
     post.assert_called_once()
     args, kwargs = post.call_args
     assert args[0] == "https://api.telegram.org/botTOK/sendDocument"
-    # File must be uploaded under the `document` key.
+    # File must be uploaded under the 'document' key.
     assert "document" in kwargs["files"]
     filename, content, mime = kwargs["files"]["document"]
     assert filename.startswith("report-999-")

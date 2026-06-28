@@ -1,19 +1,17 @@
-"""Tests for `src/app/fields.py` (Tier 1 — pure logic, no DB).
+"""Tests for 'src/app/fields.py'.
 
 We exercise the three hooks on each field class directly with raw
 strings / dicts rather than spinning up an ORM model. The DB-backed
 "round trip" path is covered indirectly: encrypt → set → get → decrypt
-matches what `from_db_value` and `to_python` are responsible for.
+matches what 'from_db_value' and 'to_python' are responsible for.
 """
 
 from __future__ import annotations
 
 import json
 
-
 from app.fields import EncryptedCharField, EncryptedJSONField
 from utils.crypto import encrypt
-
 
 # ──────────────────────────────────────────────
 # EncryptedCharField — from_db_value / to_python

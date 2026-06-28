@@ -1,9 +1,9 @@
-"""Local conftest for `src/tests/test_cron_job/`.
+"""Local conftest for 'src/tests/test_cron_job/'.
 
-The `cron_job` package imports its `db.py` module at import time to build
-a SQLAlchemy engine — which raises `EnvironmentError` unless DB_NAME,
+The 'cron_job' package imports its 'db.py' module at import time to build
+a SQLAlchemy engine — which raises 'EnvironmentError' unless DB_NAME,
 DB_USER, DB_PASSWORD are set. We pre-set them here so tests in this
-directory can simply `from cron_job import ...` without side effects.
+directory can simply 'from cron_job import ...' without side effects.
 """
 
 from __future__ import annotations

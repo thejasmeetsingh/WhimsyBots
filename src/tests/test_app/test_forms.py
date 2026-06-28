@@ -1,4 +1,4 @@
-"""Tests for `src/app/forms.py` (Tier 3 — forms).
+"""Tests for 'src/app/forms.py'.
 
 The form layer is mostly glue between Django's ModelForm machinery and
 the Ollama model cache. We patch the cache helpers + the Ollama client
@@ -20,7 +20,6 @@ from app.forms import (
     get_models_from_cache,
     save_models_to_cache,
 )
-
 
 # ──────────────────────────────────────────────
 # Module-level constants
@@ -177,11 +176,11 @@ def test_get_filtered_models_handles_empty_input():
 
 
 def test_mcp_server_form_has_secrets_as_json_field():
-    """`secrets` is a JSONField on the form so the admin can pass
+    """'secrets' is a JSONField on the form so the admin can pass
     arbitrary JSON in for env-vars / headers."""
 
     form = MCPServerForm()
-    # The form must expose `secrets` as a JSONField (not the model's
+    # The form must expose 'secrets' as a JSONField (not the model's
     # EncryptedJSONField — that's why the form exists at all).
     from django.forms import JSONField
 

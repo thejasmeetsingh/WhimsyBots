@@ -1,8 +1,8 @@
-"""Tests for `src/services/tool_calling_coordinator.py` (Tier 3).
+"""Tests for 'src/services/tool_calling_coordinator.py'.
 
-`run_tool_calling_loop` is the chat orchestration glue between
+'run_tool_calling_loop' is the chat orchestration glue between
 Ollama and the MCP tool executor. We patch the Ollama client and the
-sync `execute_tool_call_sync` so we can drive the loop deterministically.
+sync 'execute_tool_call_sync' so we can drive the loop deterministically.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from services.tool_calling_coordinator import run_tool_calling_loop
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -189,9 +188,7 @@ def test_loop_executes_each_tool_call_and_appends_history():
         # `model_dump()` is called on the tool_call to produce a dict.
         model_dump=lambda: {"name": "tool_a", "arguments": {"x": 1}}
     )
-    tool_call_b = SimpleNamespace(
-        model_dump=lambda: {"name": "tool_b", "arguments": {"y": 2}}
-    )
+    tool_call_b = SimpleNamespace(model_dump=lambda: {"name": "tool_b", "arguments": {"y": 2}})
 
     client = MagicMock()
     client.chat.side_effect = [
@@ -255,7 +252,7 @@ def test_loop_skips_tool_call_with_none_result():
 
 def test_loop_records_tool_call_payload_in_appended_message():
     """Each appended `{role: tool}` message should echo the original
-    tool_call dict under `tool_calls` for audit / debugging."""
+    tool_call dict under 'tool_calls' for audit / debugging."""
 
     tool_call = SimpleNamespace(model_dump=lambda: {"name": "t", "arguments": {}})
     client = MagicMock()
@@ -281,7 +278,7 @@ def test_loop_records_tool_call_payload_in_appended_message():
 
 
 def test_loop_returns_ollama_ms_from_final_turn():
-    """`ollama_ms` is captured from the LAST chat response, not the first."""
+    """'ollama_ms' is captured from the LAST chat response, not the first."""
 
     tool_call = SimpleNamespace(model_dump=lambda: {"name": "t"})
     client = MagicMock()

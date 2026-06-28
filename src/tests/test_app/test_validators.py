@@ -1,4 +1,4 @@
-"""Tests for `src/app/validators.py` (Tier 1 — pure logic)."""
+"""Tests for 'src/app/validators.py'"""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from app.validators import (
     validate_keep_alive,
     validate_transport_fields,
 )
-
 
 # ──────────────────────────────────────────────
 # validate_cron_expression
@@ -104,7 +103,7 @@ def test_validate_transport_fields_remote_without_endpoint_raises():
 
 def test_validate_transport_fields_remote_with_command_does_not_raise():
     # The validator only checks required-field-per-transport. A REMOTE
-    # server that also has a stray `command` should not fail validation
+    # server that also has a stray 'command' should not fail validation
     # (the form layer is responsible for cross-field checks elsewhere).
     validate_transport_fields(
         transport_type=MCPTransportType.REMOTE.value[0],

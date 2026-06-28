@@ -1,8 +1,8 @@
-"""Tests for `src/managers/telegram_client.py` (Tier 2 — service logic with mocks).
+"""Tests for 'src/managers/telegram_client.py'.
 
-`TelegramClientManager.create_client` is a thin wrapper that pulls
+'TelegramClientManager.create_client' is a thin wrapper that pulls
 the token + chat_id off the Bot ORM object and forwards them to the
-`clients.TelegramClient` constructor. We patch the constructor so no
+'clients.TelegramClient' constructor. We patch the constructor so no
 real HTTP / Redis client is instantiated.
 """
 
@@ -10,9 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from managers.telegram_client import TelegramClientManager
-
 
 # ──────────────────────────────────────────────
 # create_client
@@ -75,7 +73,7 @@ def test_create_client_returns_instance_from_constructor():
 def test_create_client_uses_lazy_import():
     # The manager does `from clients import TelegramClient` inside the
     # function body (to avoid a circular import). Verify by patching the
-    # `clients` module's TelegramClient attribute and checking that the
+    # 'clients' module's TelegramClient attribute and checking that the
     # patch was honored at call time.
     bot = MagicMock()
     bot.telegram_bot_token = "TOK"

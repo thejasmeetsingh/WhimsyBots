@@ -1,4 +1,4 @@
-"""Tests for `src/utils/text.py` (Tier 1 — pure logic).
+"""Tests for 'src/utils/text.py'.
 
 split_message is the highest-value single function in the utils
 layer: it is what makes Telegram's 4096-character limit invisible to
@@ -8,14 +8,12 @@ strategy and the code-fence preservation logic.
 
 from __future__ import annotations
 
-
 from utils.text import (
     _find_split_point,
     _get_unclosed_fence,
     _needs_fence_prefix,
     split_message,
 )
-
 
 # ──────────────────────────────────────────────
 # split_message — basic shape

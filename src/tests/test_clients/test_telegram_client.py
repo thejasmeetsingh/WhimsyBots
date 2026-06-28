@@ -1,18 +1,18 @@
-"""Tests for `src/clients/telegram.py` (Tier 4 — External-System Clients).
+"""Tests for 'src/clients/telegram.py'.
 
 TelegramClient wraps the Telegram Bot API. It uses:
 
-  - `requests.post` — patched at the import site (`clients.telegram.requests.post`).
-  - `redis.from_url` — patched to inject a `fake_redis` instance.
-  - `RateLimiter` (real one, real behaviour with fakeredis).
-  - `utils.text.split_message` — real behaviour (covered in Tier 1).
+  - 'requests.post' — patched at the import site ('clients.telegram.requests.post').
+  - 'redis.from_url' — patched to inject a 'fake_redis' instance.
+  - 'RateLimiter' (real one, real behaviour with fakeredis).
+  - 'utils.text.split_message' — real behaviour.
 
 Test plan highlights:
-  - 429 → `TelegramRateLimitError(retry_after=...)`.
-  - non-200 → `TelegramError`.
-  - non-`ok` body → `TelegramError`.
-  - Markdown parse failure → retry without `parse_mode`.
-  - long text → chunked via `split_message`.
+  - 429 → 'TelegramRateLimitError(retry_after=...)'.
+  - non-200 → 'TelegramError'.
+  - non-'ok' body → 'TelegramError'.
+  - Markdown parse failure → retry without 'parse_mode'.
+  - long text → chunked via 'split_message'.
 """
 
 from __future__ import annotations
@@ -23,14 +23,13 @@ import pytest
 
 from clients.telegram import TelegramClient, TelegramError, TelegramRateLimitError
 
-
 # ──────────────────────────────────────────────
 # helpers
 # ──────────────────────────────────────────────
 
 
 def _ok_response(result: dict | None = None):
-    """Build a `requests.post` return value that looks like a 200 OK."""
+    """Build a 'requests.post' return value that looks like a 200 OK."""
     resp = MagicMock(name="Response")
     resp.status_code = 200
     resp.json.return_value = {"ok": True, "result": result or {"message_id": 1}}
@@ -184,7 +183,6 @@ def test_send_message_chunks_long_text(patched_post, tg):
 def test_send_message_retries_without_parse_mode_on_markdown_error(patched_post, tg):
     """When Telegram complains about markdown entities, retry as plain text."""
 
-    parse_err = TelegramError("400: Bad Request: can't parse entities")
     ok = _ok_response({"message_id": 99})
 
     # First call: 400 with markdown parse failure. Second call: 200 plain.
@@ -208,9 +206,7 @@ def test_send_message_does_not_retry_on_unrelated_errors(patched_post, tg):
     For any other TelegramError the plain-text retry must NOT be issued —
     only the original call (with parse_mode) is made.
     """
-    patched_post.return_value = _error_response(
-        500, {"description": "internal server error"}
-    )
+    patched_post.return_value = _error_response(500, {"description": "internal server error"})
 
     tg.send_message("hello")
 

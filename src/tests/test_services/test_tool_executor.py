@@ -1,9 +1,9 @@
-"""Tests for `src/services/tool_executor.py` (Tier 3 — orchestration).
+"""Tests for 'src/services/tool_executor.py'.
 
 Three units are tested:
-  — `MCPToolConfig.get_transport` — URL/command presence decides transport.
-  — `MCPToolsBuilder` — config & transport selection, async build path.
-  — `ToolExecutor` — find-by-name, execute (async + sync), error mapping.
+  — 'MCPToolConfig.get_transport' — URL/command presence decides transport.
+  — 'MCPToolsBuilder' — config & transport selection, async build path.
+  — 'ToolExecutor' — find-by-name, execute (async + sync), error mapping.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from services.tool_executor import (
     ToolExecutor,
 )
 from strings import INVALID_TOOL, TOOL_EXECUTION_FAILED
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -174,9 +173,7 @@ async def test_build_tools_from_servers_skips_failed_servers(caplog):
         patch("services.tool_executor.mcp_client", side_effect=fake_client),
         caplog.at_level(logging.ERROR, logger="services.tool_executor"),
     ):
-        configs = await MCPToolsBuilder.build_tools_from_servers(
-            [server_ok, server_bad]
-        )
+        configs = await MCPToolsBuilder.build_tools_from_servers([server_ok, server_bad])
 
     # Only the working server contributed tools.
     assert len(configs) == 1
@@ -211,25 +208,19 @@ async def test_build_tools_from_servers_concatenates_across_servers():
 
 
 def test_find_tool_by_call_returns_matching_config():
-    executor = ToolExecutor(
-        [MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")]
-    )
+    executor = ToolExecutor([MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")])
     found = executor.find_tool_by_call({"name": "foo"})
     assert found is not None
     assert found.tool["function"]["name"] == "foo"
 
 
 def test_find_tool_by_call_returns_none_when_no_match():
-    executor = ToolExecutor(
-        [MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")]
-    )
+    executor = ToolExecutor([MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")])
     assert executor.find_tool_by_call({"name": "bar"}) is None
 
 
 def test_find_tool_by_call_handles_missing_name():
-    executor = ToolExecutor(
-        [MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")]
-    )
+    executor = ToolExecutor([MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")])
     assert executor.find_tool_by_call({}) is None
 
 
@@ -313,9 +304,7 @@ async def test_execute_tool_propagates_exceptions():
 
 
 def test_execute_tool_call_sync_returns_invalid_tool_when_not_found():
-    executor = ToolExecutor(
-        [MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")]
-    )
+    executor = ToolExecutor([MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")])
     result = executor.execute_tool_call_sync({"name": "missing"})
     assert result == INVALID_TOOL.format(tool="missing")
 
@@ -323,9 +312,8 @@ def test_execute_tool_call_sync_returns_invalid_tool_when_not_found():
 def test_execute_tool_call_sync_returns_tool_result_on_success():
     cfg = MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")
     executor = ToolExecutor([cfg])
-    fake_response = {"isError": False, "content": [{"text": "hello"}]}
 
-    # Patch `asyncio.run` because `execute_tool_call_sync` is sync but
+    # Patch 'asyncio.run' because 'execute_tool_call_sync' is sync but
     # calls an async method internally.
     with patch(
         "services.tool_executor.asyncio.run",
@@ -356,10 +344,7 @@ def test_execute_tool_call_sync_handles_missing_name_gracefully():
     executor = ToolExecutor([])
     # Tool name missing → can't find → return INVALID_TOOL with "None".
     result = executor.execute_tool_call_sync({})
-    assert (
-        INVALID_TOOL.format(tool=None) in result
-        or INVALID_TOOL.format(tool="None") in result
-    )
+    assert INVALID_TOOL.format(tool=None) in result or INVALID_TOOL.format(tool="None") in result
 
 
 # ──────────────────────────────────────────────
@@ -378,6 +363,4 @@ def test_tool_executor_with_empty_list_is_valid():
     # circuit cleanly on any tool call.
     executor = ToolExecutor([])
     assert executor.find_tool_by_call({"name": "any"}) is None
-    assert executor.execute_tool_call_sync({"name": "any"}) == INVALID_TOOL.format(
-        tool="any"
-    )
+    assert executor.execute_tool_call_sync({"name": "any"}) == INVALID_TOOL.format(tool="any")

@@ -1,14 +1,13 @@
-"""Tests for `src/services/token_budget.py` (Tier 1 — pure logic).
+"""Tests for 'src/services/token_budget.py'.
 
 TokenBudgetService is pure math + pydantic models — no DB, no I/O.
-We pass plain objects that quack like `Ollama` and `Message` instances
-via `SimpleNamespace`, so the tests stay independent of the ORM.
+We pass plain objects that quack like 'Ollama' and 'Message' instances
+via 'SimpleNamespace', so the tests stay independent of the ORM.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-
 
 from services.token_budget import (
     ALLOCATION_RATIOS,
@@ -20,7 +19,6 @@ from services.token_budget import (
     TokenBudget,
     TokenBudgetService,
 )
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -96,7 +94,7 @@ def test_compute_subtracts_fixed_overhead():
 
 def test_compute_usable_tokens_is_non_negative():
     # Even pathological configs (huge tool defs vs tiny num_ctx) must
-    # produce a non-negative `usable_tokens` rather than blowing up.
+    # produce a non-negative 'usable_tokens' rather than blowing up.
     budget = TokenBudgetService.compute(_ollama(num_ctx=4096), [_tool_def("a")] * 50)
     assert budget.usable_tokens >= 0
 
@@ -115,9 +113,7 @@ def test_compute_measures_tool_def_tokens_with_buffer():
 
 def test_compute_tool_def_tokens_scale_with_definitions():
     one_tool = TokenBudgetService.compute(_ollama(), [_tool_def("a")])
-    five_tools = TokenBudgetService.compute(
-        _ollama(), [_tool_def(f"t{i}") for i in range(5)]
-    )
+    five_tools = TokenBudgetService.compute(_ollama(), [_tool_def(f"t{i}") for i in range(5)])
     assert five_tools.tool_def_tokens > one_tool.tool_def_tokens
 
 

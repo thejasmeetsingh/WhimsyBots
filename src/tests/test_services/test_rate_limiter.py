@@ -1,14 +1,12 @@
-"""Tests for `src/services/rate_limiter.py` (Tier 1 — pure logic, fakeredis).
+"""Tests for 'src/services/rate_limiter.py'.
 
 RateLimiter does no I/O of its own — the Redis client is injected.
-We pass the `fake_redis` fixture from `conftest.py` for full isolation.
+We pass the 'fake_redis' fixture from 'conftest.py' for full isolation.
 """
 
 from __future__ import annotations
 
-
 from services.rate_limiter import RateLimiter
-
 
 # ──────────────────────────────────────────────
 # acquire — basic behaviour

@@ -1,14 +1,14 @@
-"""Tests for `src/services/telegram_update_handler.py` (Tier 3).
+"""Tests for 'src/services/telegram_update_handler.py'.
 
 TelegramUpdateHandler.handle_update is a synchronous orchestrator that:
-  1. Parses the raw Telegram payload via `utils.telegram.parse_telegram_update`.
+  1. Parses the raw Telegram payload via 'utils.telegram.parse_telegram_update'.
   2. Persists the user message.
-  3. Updates `bot.telegram_chat_id` if not yet set.
+  3. Updates 'bot.telegram_chat_id' if not yet set.
   4. Sends a typing indicator.
   5. Queues the embedding-generation task.
 
-The local import `from app.tasks import generate_embedding` is patched
-at the `app.tasks` module level (per the test plan), and the
+The local import 'from app.tasks import generate_embedding' is patched
+at the 'app.tasks' module level (per the test plan), and the
 TelegramClient constructor is patched similarly.
 """
 
@@ -17,10 +17,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
 from app.choices import MessageRole
 from services.telegram_update_handler import TelegramUpdateHandler
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -74,12 +72,12 @@ def test_handle_update_sets_chat_id_when_unset():
 
     with (
         patch("services.telegram_update_handler.parse_telegram_update") as parse,
-        patch("services.telegram_update_handler.TelegramClientManager") as mgr,
+        patch("services.telegram_update_handler.TelegramClientManager"),
         patch(
             "services.telegram_update_handler.Message.objects.create",
             return_value=fake_msg,
         ),
-        patch("app.tasks.generate_embedding") as emb_task,
+        patch("app.tasks.generate_embedding"),
     ):
         parse.return_value = {
             "chat_id": "999",
@@ -103,12 +101,12 @@ def test_handle_update_does_not_overwrite_existing_chat_id():
 
     with (
         patch("services.telegram_update_handler.parse_telegram_update") as parse,
-        patch("services.telegram_update_handler.TelegramClientManager") as mgr,
+        patch("services.telegram_update_handler.TelegramClientManager"),
         patch(
             "services.telegram_update_handler.Message.objects.create",
             return_value=fake_msg,
         ),
-        patch("app.tasks.generate_embedding") as emb_task,
+        patch("app.tasks.generate_embedding"),
     ):
         parse.return_value = {
             "chat_id": "999",
@@ -135,12 +133,12 @@ def test_handle_update_persists_user_message_with_correct_role():
 
     with (
         patch("services.telegram_update_handler.parse_telegram_update") as parse,
-        patch("services.telegram_update_handler.TelegramClientManager") as mgr,
+        patch("services.telegram_update_handler.TelegramClientManager"),
         patch(
             "services.telegram_update_handler.Message.objects.create",
             return_value=fake_msg,
         ) as create,
-        patch("app.tasks.generate_embedding") as emb_task,
+        patch("app.tasks.generate_embedding"),
     ):
         parse.return_value = {
             "chat_id": "999",
@@ -178,7 +176,7 @@ def test_handle_update_sends_typing_indicator():
             "services.telegram_update_handler.Message.objects.create",
             return_value=fake_msg,
         ),
-        patch("app.tasks.generate_embedding") as emb_task,
+        patch("app.tasks.generate_embedding"),
     ):
         parse.return_value = {
             "chat_id": "999",

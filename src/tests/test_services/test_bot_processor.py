@@ -1,13 +1,13 @@
-"""Tests for `src/services/bot_processor.py` (Tier 3).
+"""Tests for 'src/services/bot_processor.py'.
 
-`BotMessageProcessor` is the orchestration layer between the Celery
+'BotMessageProcessor' is the orchestration layer between the Celery
 task and the lower-level services. The biggest testing hurdle is that
-`_get_tools_config` is synchronous but calls
-`asyncio.run(MCPToolsBuilder.build_tools_from_servers(...))` internally.
+'_get_tools_config' is synchronous but calls
+'asyncio.run(MCPToolsBuilder.build_tools_from_servers(...))' internally.
 
-We patch `asyncio.run` to a sync mock so we don't need a real event
-loop, and we patch `MCPToolsBuilder.build_tools_from_servers` to a
-plain function (not coroutine) since `asyncio.run` is what makes it async.
+We patch 'asyncio.run' to a sync mock so we don't need a real event
+loop, and we patch 'MCPToolsBuilder.build_tools_from_servers' to a
+plain function (not coroutine) since 'asyncio.run' is what makes it async.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from services.bot_processor import BotMessageProcessor
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -101,9 +100,7 @@ def test_get_tools_config_uses_asyncio_run_to_bridge_sync_to_async(
             "services.bot_processor.asyncio.run", side_effect=lambda coro: fake_configs
         ) as runner,
         patch("services.bot_processor.MCPServer.objects.filter", return_value=[]),
-        patch(
-            "services.bot_processor.MCPServer.get_default_mcp_servers", return_value={}
-        ),
+        patch("services.bot_processor.MCPServer.get_default_mcp_servers", return_value={}),
     ):
         result = proc._get_tools_config()
 
@@ -123,24 +120,18 @@ def test_get_tools_config_returns_builder_output_directly(patch_telegram_client)
             "services.bot_processor.MCPToolsBuilder.build_tools_from_servers",
             return_value=fake_configs,
         ),
-        patch(
-            "services.bot_processor.asyncio.run", side_effect=lambda coro: fake_configs
-        ),
+        patch("services.bot_processor.asyncio.run", side_effect=lambda coro: fake_configs),
         patch("services.bot_processor.MCPServer.objects.filter", return_value=[]),
-        patch(
-            "services.bot_processor.MCPServer.get_default_mcp_servers", return_value={}
-        ),
+        patch("services.bot_processor.MCPServer.get_default_mcp_servers", return_value={}),
     ):
-        with patch(
-            "services.bot_processor.asyncio.run", side_effect=lambda coro: fake_configs
-        ):
+        with patch("services.bot_processor.asyncio.run", side_effect=lambda coro: fake_configs):
             result = proc._get_tools_config()
     assert result is fake_configs
 
 
 def _run_async(coro_func):
     """Helper that invokes an `async def` callable and returns its result
-    synchronously. Used to drive `_get_tools_config`'s `asyncio.run` path."""
+    synchronously. Used to drive '_get_tools_config' 'asyncio.run' path."""
 
     import asyncio
 
@@ -197,9 +188,7 @@ def test_get_tools_config_includes_bot_scoped_servers(patch_telegram_client):
             "services.bot_processor.MCPToolsBuilder.build_tools_from_servers",
             side_effect=fake_builder,
         ),
-        patch(
-            "services.bot_processor.MCPServer.get_default_mcp_servers", return_value={}
-        ),
+        patch("services.bot_processor.MCPServer.get_default_mcp_servers", return_value={}),
         patch(
             "services.bot_processor.MCPServer.objects.filter",
             return_value=[server_a, server_b],
@@ -286,9 +275,7 @@ def test_process_message_truncates_tools_to_recommended_count(patch_telegram_cli
     with (
         patch.object(proc, "_get_tools_config", return_value=[tool_a, tool_b, tool_c]),
         patch("services.bot_processor.ContextAssembler") as Ctx,
-        patch(
-            "services.bot_processor.run_tool_calling_loop", return_value=("r", 1)
-        ) as loop,
+        patch("services.bot_processor.run_tool_calling_loop", return_value=("r", 1)) as loop,
     ):
         Ctx.return_value.assemble.return_value = SimpleNamespace(
             history=[], budget=SimpleNamespace(recommended_tool_count=2)
@@ -363,9 +350,7 @@ def test_process_cron_job_uses_cron_prompt_template(patch_telegram_client):
 
     with (
         patch.object(proc, "_get_tools_config", return_value=[]),
-        patch(
-            "services.bot_processor.run_tool_calling_loop", return_value=("r", 10)
-        ) as loop,
+        patch("services.bot_processor.run_tool_calling_loop", return_value=("r", 10)) as loop,
     ):
         proc.process_cron_job(cron_job)
 
@@ -391,16 +376,13 @@ def test_process_cron_job_does_not_pass_keep_alive(patch_telegram_client):
 
     with (
         patch.object(proc, "_get_tools_config", return_value=[]),
-        patch(
-            "services.bot_processor.run_tool_calling_loop", return_value=("r", 10)
-        ) as loop,
+        patch("services.bot_processor.run_tool_calling_loop", return_value=("r", 10)) as loop,
     ):
         proc.process_cron_job(cron_job)
 
     # Cron jobs don't pass keep_alive (default add_keep_alive=False).
-    assert (
-        "add_keep_alive" not in loop.call_args.kwargs
-        or not loop.call_args.kwargs.get("add_keep_alive")
+    assert "add_keep_alive" not in loop.call_args.kwargs or not loop.call_args.kwargs.get(
+        "add_keep_alive"
     )
 
 
@@ -426,9 +408,7 @@ def test_send_response_persists_assistant_message_and_sends_to_telegram(
     assert kwargs["content"] == "the answer"
 
 
-def test_send_response_raises_and_logs_on_telegram_failure(
-    patch_telegram_client, caplog
-):
+def test_send_response_raises_and_logs_on_telegram_failure(patch_telegram_client, caplog):
     import logging
 
     bot = _bot()

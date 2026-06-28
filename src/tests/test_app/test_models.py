@@ -1,8 +1,8 @@
-"""Tests for `src/app/models.py` (Tier 5 — model methods).
+"""Tests for 'src/app/models.py'.
 
-We exercise `Bot.save`, `MCPServer.clean`, and `MCPServer.get_default_mcp_servers`
-without hitting the real DB. `super().save()` is patched per-test so we can
-verify both the hash population logic and the `clean()` validator chain.
+We exercise 'Bot.save', 'MCPServer.clean', and 'MCPServer.get_default_mcp_servers'
+without hitting the real DB. 'super().save()' is patched per-test so we can
+verify both the hash population logic and the 'clean()' validator chain.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from django.test import override_settings
 from app.choices import MCPTransportType
 from app.models import Bot, MCPServer
 from utils.crypto import get_token_hash
-
 
 # ──────────────────────────────────────────────
 # Bot.save
@@ -39,8 +38,8 @@ def test_bot_save_populates_token_hash_when_token_provided():
 
 
 def test_bot_save_does_not_change_hash_when_token_missing():
-    """If `telegram_bot_token` is falsy (None / empty), we MUST NOT overwrite
-    `telegram_bot_token_hash` — that's how we detect duplicates on update."""
+    """If 'telegram_bot_token' is falsy (None / empty), we MUST NOT overwrite
+    'telegram_bot_token_hash' — that's how we detect duplicates on update."""
 
     existing_hash = "pre-existing-hash"
     bot = Bot(telegram_bot_token=None, telegram_bot_token_hash=existing_hash)
@@ -169,11 +168,11 @@ def test_mcp_server_clean_calls_super_clean():
     DB_HOST="test-host",
 )
 def test_get_default_mcp_servers_returns_three_servers():
-    """Three defaults must be returned: `cron_job`, `time`, `pdf_generator`."""
+    """Three defaults must be returned: 'cron_job', 'time', 'pdf_generator'."""
 
-    with patch.object(MCPServer, "get_default_mcp_servers") as patched:
-        # We need to call the *original*, so invoke the static method
-        # directly without the patch wrapper interfering.
+    # Patch is set up to ensure the static method path is reachable even
+    # though we exercise the real implementation below.
+    with patch.object(MCPServer, "get_default_mcp_servers"):
         pass
 
     servers = MCPServer.get_default_mcp_servers()
@@ -214,7 +213,7 @@ def test_get_default_mcp_servers_use_python_command():
     DB_HOST="test-host",
 )
 def test_get_default_mcp_servers_cron_job_args():
-    """`cron_job` must be invoked via `python -m cron_job`."""
+    """'cron_job' must be invoked via 'python -m cron_job'."""
 
     servers = MCPServer.get_default_mcp_servers()
     assert servers["cron_job"].args == ["-m", "cron_job"]
@@ -249,7 +248,7 @@ def test_get_default_mcp_servers_pdf_generator_args():
     DB_HOST="test-host",
 )
 def test_get_default_mcp_servers_cron_job_secrets():
-    """`cron_job` secrets must include DB credentials for the DB subsystem."""
+    """'cron_job' secrets must include DB credentials for the DB subsystem."""
 
     servers = MCPServer.get_default_mcp_servers()
     secrets = servers["cron_job"].secrets
@@ -269,7 +268,7 @@ def test_get_default_mcp_servers_cron_job_secrets():
     SECRET_KEY="my-secret",
 )
 def test_get_default_mcp_servers_pdf_generator_secrets():
-    """`pdf_generator` secrets include DB credentials + SECRET_KEY for token
+    """'pdf_generator' secrets include DB credentials + SECRET_KEY for token
     decryption."""
 
     servers = MCPServer.get_default_mcp_servers()
@@ -290,7 +289,7 @@ def test_get_default_mcp_servers_pdf_generator_secrets():
     DB_HOST="test-host",
 )
 def test_get_default_mcp_servers_time_has_no_secrets():
-    """`time` server is local-only — no DB / no decryption ⇒ no secrets."""
+    """'time' server is local-only — no DB / no decryption ⇒ no secrets."""
 
     servers = MCPServer.get_default_mcp_servers()
     assert servers["time"].secrets is None or servers["time"].secrets == {}

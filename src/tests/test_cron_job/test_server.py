@@ -1,10 +1,10 @@
-"""Tests for `src/cron_job/server.py` (Tier 6 — MCP tool implementations).
+"""Tests for 'src/cron_job/server.py'.
 
-We test the four `@mcp.tool()`-decorated functions directly. The FastMCP
+We test the four '@mcp.tool()'-decorated functions directly. The FastMCP
 decorator leaves the underlying coroutine callable, so we can invoke them
 as plain async functions in tests.
 
-`get_session` is patched with an async context manager mock that yields
+'get_session' is patched with an async context manager mock that yields
 a fake session capable of running select/update/delete operations.
 """
 
@@ -19,21 +19,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-
 # ──────────────────────────────────────────────
 # Async session mock factory
 # ──────────────────────────────────────────────
 
 
-def make_fake_session(
-    *, scalars_result=None, fetchone_result=None, scalar_one_or_none=None
-):
+def make_fake_session(*, scalars_result=None, fetchone_result=None, scalar_one_or_none=None):
     """Build an AsyncMock that mimics SQLAlchemy AsyncSession:
 
-    - `execute(stmt).scalars().all()` returns `scalars_result`
-    - `execute(stmt).fetchone()` returns `fetchone_result`
-    - `execute(stmt).scalar_one_or_none()` returns `scalar_one_or_none`
-    - `add`, `delete`, `commit`, `refresh`, `rollback`, `close` are AsyncMocks
+    - 'execute(stmt).scalars().all()' returns 'scalars_result'
+    - 'execute(stmt).fetchone()' returns 'fetchone_result'
+    - 'execute(stmt).scalar_one_or_none()' returns 'scalar_one_or_none'
+    - 'add', 'delete', 'commit', 'refresh', 'rollback', 'close' are AsyncMocks
     """
 
     session = MagicMock(name="AsyncSession")

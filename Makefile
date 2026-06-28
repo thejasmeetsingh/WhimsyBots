@@ -1,4 +1,4 @@
-.PHONY: help build up down logs shell migrate createsuperuser collectstatic lint format test test-verbose test-coverage test-specific clean restart stop start ps
+.PHONY: help build up down logs shell migrate createsuperuser collectstatic lint lint-docs format test test-verbose test-coverage test-specific clean restart stop start ps
 
 help:
 	@echo "WhimsyBots - Available Commands"
@@ -175,3 +175,12 @@ install-deps:
 # Build and test
 build-test: build test
 	@echo "Build and test completed"
+
+# Lint — runs ruff with the project config (see pyproject.toml).
+# First rollout is non-blocking: reports violations but does not fail the build.
+lint:
+	ruff check src/ || true
+
+# Docstring-only lint (pydocstyle / Google convention).
+lint-docs:
+	ruff check --select D src/ || true

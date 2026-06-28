@@ -1,28 +1,28 @@
-"""Tests for `src/clients/mcp.py` (Tier 4 — External-System Clients).
+"""Tests for 'src/clients/mcp.py'.
 
-MCPClient wraps the `mcp` Python SDK and connects to MCP servers over
+MCPClient wraps the 'mcp' Python SDK and connects to MCP servers over
 either stdio (local) or streamable-HTTP (remote). The local
-[`conftest.py`](src/tests/test_clients/conftest.py) installs lightweight
-stand-ins for the `mcp` SDK package so these tests run outside Docker.
+['conftest.py'](src/tests/test_clients/conftest.py) installs lightweight
+stand-ins for the 'mcp' SDK package so these tests run outside Docker.
 
 Patching strategy:
-    We patch symbols at their *use site* — `clients.mcp.<name>` — not at
-    the `mcp.*` import site. That way the conftest stubs keep the import
+    We patch symbols at their use site — 'clients.mcp.<name>' — not at
+    the 'mcp.*' import site. That way the conftest stubs keep the import
     graph happy while each test controls individual symbols.
 
 Highlights from the test plan:
   - LOCAL (L) → stdio_client; REMOTE (R) → streamable_http_client
-  - MCP `inputSchema` → Ollama `{type:function,function:{name,description,parameters}}`
-  - `mcp_client()` convenience: payload=None → list_tools, else execute_tool
-  - Session is cached on `_connect()` for reuse
-  - `cleanup()` closes the AsyncExitStack
+  - MCP 'inputSchema' → Ollama '{type:function,function:{name,description,parameters}}'
+  - 'mcp_client()' convenience: payload=None → list_tools, else execute_tool
+  - Session is cached on '_connect()' for reuse
+  - 'cleanup()' closes the AsyncExitStack
 
-NOTE on `AsyncExitStack.enter_async_context`:
-    Real-world async context managers' `__aenter__` returns the managed
-    object (a `ClientSession`). When we mock `ClientSession` we must use a
-    *real* async context manager class so `enter_async_context` yields our
-    session mock — not an auto-generated child `AsyncMock`. The
-    `_FakeSessionCM` helper below handles this.
+NOTE on 'AsyncExitStack.enter_async_context':
+    Real-world async context managers' '__aenter__' returns the managed
+    object (a 'ClientSession'). When we mock 'ClientSession' we must use a
+    real async context manager class so 'enter_async_context' yields our
+    session mock — not an auto-generated child 'AsyncMock'. The
+    '_FakeSessionCM' helper below handles this.
 """
 
 from __future__ import annotations
@@ -35,14 +35,13 @@ import pytest
 
 from clients.mcp import MCPClient, mcp_client
 
-
 # ──────────────────────────────────────────────
 # helpers
 # ──────────────────────────────────────────────
 
 
 class _FakeSessionCM:
-    """Async context manager whose ``__aenter__`` returns ``session``."""
+    """Async context manager whose '__aenter__' returns 'session'."""
 
     def __init__(self, session):
         self._session = session
@@ -79,7 +78,7 @@ def _tool_list_response(*tools):
 
 
 def _call_tool_response(text: str = "sunny", is_error: bool = False):
-    """Build a fake ``session.call_tool()`` response with a ``model_dump``."""
+    """Build a fake 'session.call_tool()' response with a 'model_dump'."""
     obj = SimpleNamespace(isError=is_error, content=[{"type": "text", "text": text}])
     obj.model_dump = MagicMock(
         return_value={"isError": is_error, "content": [{"type": "text", "text": text}]}
@@ -99,9 +98,7 @@ def _patch_stdio(monkeypatch, *, session=None):
         yield read, write
 
     monkeypatch.setattr("clients.mcp.stdio_client", _stdio)
-    monkeypatch.setattr(
-        "clients.mcp.ClientSession", lambda *a, **kw: _FakeSessionCM(session)
-    )
+    monkeypatch.setattr("clients.mcp.ClientSession", lambda *a, **kw: _FakeSessionCM(session))
     return session, read, write
 
 
@@ -119,12 +116,8 @@ def _patch_http(monkeypatch, *, session=None, http_client=None):
         yield read, write, "unused_get_session_id"
 
     monkeypatch.setattr("clients.mcp.streamable_http_client", _http)
-    monkeypatch.setattr(
-        "clients.mcp.httpx.AsyncClient", lambda headers=None: http_client
-    )
-    monkeypatch.setattr(
-        "clients.mcp.ClientSession", lambda *a, **kw: _FakeSessionCM(session)
-    )
+    monkeypatch.setattr("clients.mcp.httpx.AsyncClient", lambda headers=None: http_client)
+    monkeypatch.setattr("clients.mcp.ClientSession", lambda *a, **kw: _FakeSessionCM(session))
     return session, read, write
 
 
@@ -243,9 +236,7 @@ async def test_connect_remote_uses_streamable_http_client(monkeypatch, remote_co
 
 
 @pytest.mark.asyncio
-async def test_connect_remote_creates_httpx_async_client_with_headers(
-    monkeypatch, remote_config
-):
+async def test_connect_remote_creates_httpx_async_client_with_headers(monkeypatch, remote_config):
     """The HTTP client's headers come from config['headers']."""
     captured: dict = {}
 
@@ -268,14 +259,10 @@ async def test_connect_remote_creates_httpx_async_client_with_headers(
 
 
 @pytest.mark.asyncio
-async def test_list_tools_converts_mcp_schema_to_ollama_format(
-    monkeypatch, local_config
-):
+async def test_list_tools_converts_mcp_schema_to_ollama_format(monkeypatch, local_config):
     session, _, _ = _patch_stdio(monkeypatch)
     session.list_tools = AsyncMock(
-        return_value=_tool_list_response(
-            _make_tool("get_weather", "Get weather for a city")
-        )
+        return_value=_tool_list_response(_make_tool("get_weather", "Get weather for a city"))
     )
 
     client = MCPClient("L", local_config)
@@ -298,9 +285,7 @@ async def test_list_tools_converts_mcp_schema_to_ollama_format(
 
 
 @pytest.mark.asyncio
-async def test_list_tools_returns_empty_list_when_server_has_none(
-    monkeypatch, local_config
-):
+async def test_list_tools_returns_empty_list_when_server_has_none(monkeypatch, local_config):
     session, _, _ = _patch_stdio(monkeypatch)
     session.list_tools = AsyncMock(return_value=_tool_list_response())
 
@@ -311,9 +296,7 @@ async def test_list_tools_returns_empty_list_when_server_has_none(
 
 
 @pytest.mark.asyncio
-async def test_list_tools_uses_default_object_when_type_missing(
-    monkeypatch, local_config
-):
+async def test_list_tools_uses_default_object_when_type_missing(monkeypatch, local_config):
     """MCP inputSchema is expected to have 'type' but defaults to 'object'."""
     session, _, _ = _patch_stdio(monkeypatch)
     session.list_tools = AsyncMock(
@@ -338,9 +321,7 @@ async def test_list_tools_uses_default_object_when_type_missing(
 @pytest.mark.asyncio
 async def test_list_tools_supports_remote_transport(monkeypatch, remote_config):
     session, _, _ = _patch_http(monkeypatch)
-    session.list_tools = AsyncMock(
-        return_value=_tool_list_response(_make_tool("get_time"))
-    )
+    session.list_tools = AsyncMock(return_value=_tool_list_response(_make_tool("get_time")))
 
     client = MCPClient("R", remote_config)
     tools = await client.list_tools()
@@ -387,9 +368,7 @@ async def test_execute_tool_supports_no_arguments(monkeypatch, local_config):
 @pytest.mark.asyncio
 async def test_execute_tool_reports_errors(monkeypatch, local_config):
     session, _, _ = _patch_stdio(monkeypatch)
-    session.call_tool = AsyncMock(
-        return_value=_call_tool_response(text="boom", is_error=True)
-    )
+    session.call_tool = AsyncMock(return_value=_call_tool_response(text="boom", is_error=True))
 
     client = MCPClient("L", local_config)
     result = await client.execute_tool("broken", {})
@@ -417,7 +396,7 @@ async def test_cleanup_closes_exit_stack(monkeypatch, local_config):
 
 @pytest.mark.asyncio
 async def test_cleanup_clears_cached_session(monkeypatch, local_config):
-    """After cleanup, ``_session`` is None — a subsequent ``_connect()`` reconnects."""
+    """After cleanup, '_session' is None — a subsequent '_connect()' reconnects."""
     session = _make_session()
     call_count = {"n": 0}
 
@@ -468,7 +447,7 @@ async def test_mcp_client_executes_tool_when_payload_given(monkeypatch, local_co
     session.call_tool = AsyncMock(return_value=_call_tool_response(text="done"))
 
     # Payload keys must match `execute_tool(self, name, arguments=None)` —
-    # i.e. ``name`` and ``arguments`` (NOT ``args``).
+    # i.e. 'name' and 'arguments' (NOT 'args').
     result = await mcp_client(
         "L",
         local_config,

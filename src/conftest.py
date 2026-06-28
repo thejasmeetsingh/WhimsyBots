@@ -1,3 +1,11 @@
+"""Root conftest for the project's pytest suite.
+
+Provides the shared fixtures every test module relies on: an
+in-memory SQLite-backed Django DB, a per-test fakeredis instance, and
+a session-scoped fakeredis server for tests that need multiple
+clients pointing at the same in-memory store.
+"""
+
 import fakeredis
 import pytest
 
@@ -7,8 +15,8 @@ import pytest
 # ──────────────────────────────────────────────
 @pytest.fixture(scope="session")
 def django_db_setup():
-    """
-    Use the in-memory SQLite DB defined in test settings.
+    """Use the in-memory SQLite DB defined in test settings.
+
     No teardown needed – :memory: disappears automatically.
     """
     pass
@@ -19,8 +27,8 @@ def django_db_setup():
 # ──────────────────────────────────────────────
 @pytest.fixture
 def fake_redis():
-    """
-    A fresh fakeredis instance per test.
+    """Yield a fresh fakeredis instance per test.
+
     Inject this wherever your code would normally receive a Redis client.
     """
     server = fakeredis.FakeServer()
@@ -32,8 +40,8 @@ def fake_redis():
 
 @pytest.fixture(scope="session")
 def fake_redis_server():
-    """
-    A shared fakeredis server for the whole test session.
+    """Yield a shared fakeredis server for the whole test session.
+
     Useful when you need multiple clients pointing at the same server.
     """
     return fakeredis.FakeServer()

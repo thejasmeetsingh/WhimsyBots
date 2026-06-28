@@ -1,7 +1,7 @@
-"""Tests for `src/whimsybots/views.py` (Tier 5 — Django webhook view).
+"""Tests for 'src/whimsybots/views.py'.
 
-We use Django's `RequestFactory` to build synthetic POST requests without
-spinning up a real HTTP server, and patch `telegram_msg_handler.apply_async`
+We use Django's 'RequestFactory' to build synthetic POST requests without
+spinning up a real HTTP server, and patch 'telegram_msg_handler.apply_async'
 to verify the queued task signature.
 """
 
@@ -28,7 +28,7 @@ def factory():
 
 
 def test_post_without_token_returns_bad_request(factory):
-    """`token` is captured from the URL kwargs. If absent, respond 400."""
+    """'token' is captured from the URL kwargs. If absent, respond 400."""
 
     view = TelegramWebhook()
     request = factory.post("/webhook/", data="{}", content_type="application/json")

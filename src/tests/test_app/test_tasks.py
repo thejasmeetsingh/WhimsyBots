@@ -1,8 +1,8 @@
-"""Tests for `src/app/tasks.py` (Tier 3 — Celery task bodies).
+"""Tests for 'src/app/tasks.py'.
 
-Celery's `@celery.task(bind=True, max_retries=...)` decorator returns a
-`PromiseProxy`. Calling `.run(...)` invokes the task body directly with
-`self` and the bound kwargs — perfect for synchronous unit testing
+Celery's '@celery.task(bind=True, max_retries=...)' decorator returns a
+'PromiseProxy'. Calling '.run(...)' invokes the task body directly with
+'self' and the bound kwargs — perfect for synchronous unit testing
 without a Celery worker.
 
 All ORM access is patched at the source location so we never hit the DB.
@@ -18,7 +18,6 @@ import pytest
 
 from app import tasks as app_tasks
 from strings import WEBHOOK_SETUP_SUCCESS
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -91,9 +90,7 @@ def test_telegram_msg_handler_resolves_bot_by_token_hash():
     # Bot looked up by token hash (SHA-256 hex digest).
     from utils.crypto import get_token_hash
 
-    bot_objs.get.assert_called_once_with(
-        telegram_bot_token_hash=get_token_hash("the-token")
-    )
+    bot_objs.get.assert_called_once_with(telegram_bot_token_hash=get_token_hash("the-token"))
     handler.handle_update.assert_called_once_with(bot, update)
 
 
@@ -458,7 +455,7 @@ def test_queue_post_response_followups_always_queues_summary():
 def test_queue_post_response_followups_queues_patterns_when_due():
     bot = _bot()
     with (
-        patch("app.tasks.manage_conversation_summary") as summary_task,
+        patch("app.tasks.manage_conversation_summary"),
         patch("app.tasks.regenerate_observed_patterns") as pattern_task,
         patch("app.tasks.ObservedPatternsService") as pattern_svc_cls,
     ):
@@ -481,7 +478,7 @@ def test_manage_conversation_summary_returns_when_no_ollama():
 
 
 def test_manage_conversation_summary_uses_bulk_create_and_update():
-    # Build a fake bot with a `conversations` attribute set, plus a fake
+    # Build a fake bot with a 'conversations' attribute set, plus a fake
     # summary result.
     class _Bot:
         id = uuid.uuid4()
@@ -516,9 +513,7 @@ def test_manage_conversation_summary_uses_bulk_create_and_update():
 
 def test_manage_conversation_summary_skips_bots_with_no_conversations():
     # A bot with empty conversations must short-circuit cleanly.
-    bot = SimpleNamespace(
-        id=uuid.uuid4(), name="b", conversations=[], system_messages=[]
-    )
+    bot = SimpleNamespace(id=uuid.uuid4(), name="b", conversations=[], system_messages=[])
     fake_queryset = MagicMock()
     fake_queryset.count.return_value = 0
     fake_queryset.__iter__ = lambda self: iter([bot])

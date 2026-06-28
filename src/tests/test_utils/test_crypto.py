@@ -1,4 +1,4 @@
-"""Tests for `src/utils/crypto.py` (Tier 1 — pure logic)."""
+"""Tests for 'src/utils/crypto.py'."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
 from utils.crypto import decrypt, encrypt, get_fernet, get_token_hash
-
 
 # ──────────────────────────────────────────────
 # get_fernet

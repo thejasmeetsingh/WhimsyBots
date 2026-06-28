@@ -1,14 +1,13 @@
-"""Tests for `src/services/observed_patterns.py` (Tier 3).
+"""Tests for 'src/services/observed_patterns.py'.
 
 The service is a thin wrapper around an LLM call. We patch
-`OllamaClient.chat` and the `Message.objects` queryset.
+'OllamaClient.chat' and the 'Message.objects' queryset.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-
 
 from app.choices import MessageRole
 from services.observed_patterns import (
@@ -17,7 +16,6 @@ from services.observed_patterns import (
     PATTERN_REGEN_EVERY_N_MESSAGES,
     ObservedPatternsService,
 )
-
 
 # ──────────────────────────────────────────────
 # Constants
@@ -118,9 +116,7 @@ def test_format_history_includes_user_and_assistant():
         _msg(MessageRole.USER.value[0], "hi"),
         _msg(MessageRole.ASSISTANT.value[0], "hello"),
     ]
-    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(
-        messages
-    )
+    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(messages)
     assert "User: hi" in text
     assert "Assistant: hello" in text
 
@@ -131,25 +127,19 @@ def test_format_history_skips_system_role_messages():
         _msg(MessageRole.SYSTEM.value[0], "internal summary"),
         _msg(MessageRole.ASSISTANT.value[0], "hello"),
     ]
-    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(
-        messages
-    )
+    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(messages)
     assert "internal summary" not in text
 
 
 def test_format_history_includes_timestamp():
     messages = [_msg(MessageRole.USER.value[0], "ping", ts="2024-06-15 10:30")]
-    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(
-        messages
-    )
+    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(messages)
     assert "[2024-06-15 10:30]" in text
 
 
 def test_format_history_uses_unknown_label_for_unknown_role():
     messages = [_msg("Z", "mystery")]
-    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(
-        messages
-    )
+    text = ObservedPatternsService(bot=_bot(), ollama=_ollama())._format_history(messages)
     assert "Unknown: mystery" in text
 
 
@@ -186,7 +176,7 @@ def test_call_llm_passes_model_from_bot():
         svc._call_llm("p")
     kwargs = Client.return_value.chat.call_args.kwargs
     assert kwargs["model"] == "mistral"
-    # Pattern gen uses plain text — only `model` and `messages` are passed.
+    # Pattern gen uses plain text — only 'model' and 'messages' are passed.
     assert "messages" in kwargs
     assert "tools" not in kwargs
     assert "format" not in kwargs
@@ -200,9 +190,7 @@ def test_call_llm_passes_model_from_bot():
 def test_regenerate_skips_when_no_messages(caplog):
     import logging
 
-    bot = SimpleNamespace(
-        id="b", ollama_model="m", observed_patterns="", save=MagicMock()
-    )
+    bot = SimpleNamespace(id="b", ollama_model="m", observed_patterns="", save=MagicMock())
     svc = ObservedPatternsService(bot=bot, ollama=_ollama())
 
     # Empty queryset ⇒ skip and log.
@@ -218,9 +206,7 @@ def test_regenerate_skips_when_no_messages(caplog):
 def test_regenerate_skips_when_llm_returns_empty(caplog):
     import logging
 
-    bot = SimpleNamespace(
-        id="b", ollama_model="m", observed_patterns="", save=MagicMock()
-    )
+    bot = SimpleNamespace(id="b", ollama_model="m", observed_patterns="", save=MagicMock())
     svc = ObservedPatternsService(bot=bot, ollama=_ollama())
     msg = _msg(MessageRole.USER.value[0], "hi")
 
@@ -236,9 +222,7 @@ def test_regenerate_skips_when_llm_returns_empty(caplog):
 
 
 def test_regenerate_truncates_output_to_max_chars():
-    bot = SimpleNamespace(
-        id="b", ollama_model="m", observed_patterns="", save=MagicMock()
-    )
+    bot = SimpleNamespace(id="b", ollama_model="m", observed_patterns="", save=MagicMock())
     svc = ObservedPatternsService(bot=bot, ollama=_ollama())
     msg = _msg(MessageRole.USER.value[0], "hi")
 
@@ -255,9 +239,7 @@ def test_regenerate_truncates_output_to_max_chars():
 
 
 def test_regenerate_saves_patterns_on_success():
-    bot = SimpleNamespace(
-        id="b", ollama_model="m", observed_patterns="", save=MagicMock()
-    )
+    bot = SimpleNamespace(id="b", ollama_model="m", observed_patterns="", save=MagicMock())
     svc = ObservedPatternsService(bot=bot, ollama=_ollama())
     msg = _msg(MessageRole.USER.value[0], "hi")
 
@@ -279,9 +261,7 @@ def test_regenerate_reverses_messages_for_chronological_order():
     """Messages arrive newest-first from the ORM; we reverse before formatting."""
 
     captured = {}
-    bot = SimpleNamespace(
-        id="b", ollama_model="m", observed_patterns="", save=MagicMock()
-    )
+    bot = SimpleNamespace(id="b", ollama_model="m", observed_patterns="", save=MagicMock())
     svc = ObservedPatternsService(bot=bot, ollama=_ollama())
     msg1 = _msg(MessageRole.USER.value[0], "oldest")
     msg2 = _msg(MessageRole.USER.value[0], "newest")

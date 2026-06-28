@@ -1,16 +1,16 @@
-"""Tests for `src/pdf_generator/server.py` (Tier 6 — MCP tool implementations).
+"""Tests for 'src/pdf_generator/server.py'.
 
-We test the single `@mcp.tool()`-decorated async function
-`generate_and_send_report`. The orchestration is:
+We test the single '@mcp.tool()'-decorated async function
+'generate_and_send_report'. The orchestration is:
 
-1. Parse `bot_id` as UUID (returns error string if bad).
+1. Parse 'bot_id' as UUID (returns error string if bad).
 2. Extract HTML from the contents (returns raw contents if no HTML).
 3. Generate PDF bytes from the HTML.
 4. Fetch bot credentials from DB.
 5. Decrypt the token.
 6. Send the PDF to Telegram.
 
-We mock `extract_html`, `generate_pdf`, `decrypt_token`, `send_document`,
+We mock 'extract_html', 'generate_pdf', 'decrypt_token', 'send_document',
 and the DB session.
 """
 
@@ -25,7 +25,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 
-
 BOT_ID = "11111111-1111-1111-1111-111111111111"
 FAKE_PDF = b"%PDF-1.4 fake"
 
@@ -38,12 +37,10 @@ def _encrypt(plaintext: str, secret: str) -> str:
 
 def _patch_session_with_row(*, row):
     """Patch `pdf_generator.server.get_session` to yield a fake session
-    whose `execute(...).fetchone()` returns `row`."""
+    whose 'execute(...).fetchone()' returns 'row'."""
 
     session = MagicMock(name="AsyncSession")
-    session.execute = AsyncMock(
-        return_value=MagicMock(fetchone=MagicMock(return_value=row))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(fetchone=MagicMock(return_value=row)))
     session.close = AsyncMock()
 
     @asynccontextmanager
@@ -72,7 +69,7 @@ async def test_generate_and_send_report_invalid_bot_uuid_returns_error():
 
 @pytest.mark.asyncio
 async def test_generate_and_send_report_no_html_returns_raw_contents():
-    """If `extract_html` cannot find HTML in the contents, the function
+    """If 'extract_html' cannot find HTML in the contents, the function
     returns the original contents (unchanged) without sending anything."""
 
     from pdf_generator.server import generate_and_send_report
@@ -92,7 +89,7 @@ async def test_generate_and_send_report_no_html_returns_raw_contents():
 
 @pytest.mark.asyncio
 async def test_generate_and_send_report_bot_not_found_returns_uuid_string():
-    """If the DB row lookup yields `None`, the function returns the
+    """If the DB row lookup yields 'None', the function returns the
     stringified UUID without crashing."""
 
     from pdf_generator.server import generate_and_send_report
@@ -142,9 +139,7 @@ async def test_generate_and_send_report_happy_path_sends_pdf():
         patch.dict(os.environ, {"SECRET_KEY": secret}),
         patch("pdf_generator.server.extract_html", return_value=html),
         patch("pdf_generator.server.generate_pdf", return_value=FAKE_PDF) as gen_pdf,
-        patch(
-            "pdf_generator.server.decrypt_token", return_value="BOT-TOKEN"
-        ) as decrypt,
+        patch("pdf_generator.server.decrypt_token", return_value="BOT-TOKEN") as decrypt,
         patch("pdf_generator.server.send_document") as send,
     ):
         out = await generate_and_send_report(BOT_ID, contents)

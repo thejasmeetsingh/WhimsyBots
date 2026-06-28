@@ -1,12 +1,12 @@
-"""Tests for `src/utils/tasks.py` (Tier 2 — service logic with mocks).
+"""Tests for 'src/utils/tasks.py'.
 
-The helpers in `utils.tasks` cover three concerns:
+The helpers in 'utils.tasks' cover three concerns:
   1. Object lookups (get_ollama_cfg, get_bot_obj, get_cron_obj, get_msg_obj).
   2. Embedding generation dispatch (generate_message_embedding,
      generate_cron_job_embedding, generate_mcp_embedding).
   3. Error-handling helpers (build_error_description, log_task_failure).
 
-Most tests use `unittest.mock.patch` because the helpers cross-cut the
+Most tests use 'unittest.mock.patch' because the helpers cross-cut the
 ORM and the EmbeddingService — we want to assert the contract, not
 exercise the entire stack.
 """
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 from unittest.mock import MagicMock, patch
-
 
 from app.choices import MessageRole
 from clients.telegram import TelegramRateLimitError
@@ -40,7 +39,6 @@ from utils.tasks import (
     get_ollama_cfg,
     log_task_failure,
 )
-
 
 # ──────────────────────────────────────────────
 # Module-level constants
@@ -143,9 +141,7 @@ def test_get_msg_obj_returns_message_when_present():
 
 def test_get_ollama_cfg_returns_config_when_present():
     ollama_cfg = MagicMock()
-    with patch(
-        "utils.tasks.OllamaConfigManager.get_ollama_config", return_value=ollama_cfg
-    ):
+    with patch("utils.tasks.OllamaConfigManager.get_ollama_config", return_value=ollama_cfg):
         assert get_ollama_cfg() is ollama_cfg
 
 
@@ -283,9 +279,7 @@ def test_generate_cron_job_embedding_persists_embedding():
         result = generate_cron_job_embedding(ollama_cfg, "c-1")
 
     svc_cls.assert_called_once_with(bot=cron_job.bot, ollama=ollama_cfg)
-    svc_cls.return_value.save_cron_job_embedding.assert_called_once_with(
-        cron_job=cron_job
-    )
+    svc_cls.return_value.save_cron_job_embedding.assert_called_once_with(cron_job=cron_job)
     assert result is cron_job.bot
 
 
@@ -391,9 +385,7 @@ def test_build_error_description_generic_template_matches_strings():
 
     description, _ = build_error_description(func_name="some_task", bot=bot, error=err)
 
-    expected = GENERAL_TASK_ERROR.format(
-        func_name="some_task", bot_name="mybot", error=str(err)
-    )
+    expected = GENERAL_TASK_ERROR.format(func_name="some_task", bot_name="mybot", error=str(err))
     assert description == expected
 
 

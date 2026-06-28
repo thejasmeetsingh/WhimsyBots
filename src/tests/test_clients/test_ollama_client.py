@@ -1,12 +1,12 @@
-"""Tests for `src/clients/ollama.py` (Tier 4 — External-System Clients).
+"""Tests for 'src/clients/ollama.py'.
 
-OllamaClient wraps the official `ollama` Python SDK. We patch
-`ollama.Client` so no real HTTP calls are made.
+OllamaClient wraps the official 'ollama' Python SDK. We patch
+'ollama.Client' so no real HTTP calls are made.
 
 Highlights from the test plan:
   - localhost → host.docker.internal
-  - keep_alive `"-1"`/`"0"` → int, else preserved as string
-  - Bearer Authorization header when `api_key` is provided
+  - keep_alive "-1"/"0" → int, else preserved as string
+  - Bearer Authorization header when 'api_key' is provided
   - Embedding list response flattening (nested → flat)
 """
 
@@ -18,7 +18,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from clients.ollama import OllamaClient
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -152,7 +151,7 @@ def test_list_models_skips_entries_with_empty_model_attr(client):
 
 
 def test_list_models_skips_entries_missing_model_attr(client):
-    # Source uses `model.model`; a SimpleNamespace without a `model` attr
+    # Source uses 'model.model'; a SimpleNamespace without a 'model' attr
     # raises AttributeError and that entry propagates as an exception.
     # Pin that current behaviour.
     client._client.list.return_value = SimpleNamespace(
@@ -293,9 +292,7 @@ def test_generate_embeddings_forwards_truncate_and_dimensions(client):
 
 
 def test_fetch_model_capabilities_returns_capabilities_list(client):
-    client._client.show.return_value = SimpleNamespace(
-        capabilities=["completion", "tools"]
-    )
+    client._client.show.return_value = SimpleNamespace(capabilities=["completion", "tools"])
     assert client.fetch_model_capabilities("llama3") == ["completion", "tools"]
 
 

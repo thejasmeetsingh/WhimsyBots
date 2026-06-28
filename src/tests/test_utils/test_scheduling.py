@@ -1,4 +1,4 @@
-"""Tests for `src/utils/scheduling.py` (Tier 1 — pure logic)."""
+"""Tests for 'src/utils/scheduling.py'."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from croniter import croniter
 from django.utils import timezone as django_timezone
 
 from utils.scheduling import calculate_next_run_at
-
 
 # ──────────────────────────────────────────────
 # calculate_next_run_at
@@ -35,7 +34,7 @@ def test_calculate_next_run_at_is_timezone_aware():
 
 def test_calculate_next_run_at_matches_croniter_reference():
     # Cross-check: the same expression computed via croniter directly
-    # from `now` should yield the exact same value (to the second).
+    # from 'now' should yield the exact same value (to the second).
     expression = "15 14 * * 1"  # every Monday at 14:15
     now = django_timezone.now()
     expected = croniter(expression, now).get_next(datetime)

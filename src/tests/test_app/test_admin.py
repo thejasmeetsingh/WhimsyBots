@@ -1,9 +1,9 @@
-"""Tests for `src/app/admin.py` (Tier 5 — admin classes).
+"""Tests for 'src/app/admin.py'.
 
 The admin classes are mostly thin Django glue: filtering, custom
 permissions, save_model hooks, and display helpers. We exercise them
-on `SimpleNamespace`-style mocks so the tests stay fast and never
-touch a real DB. `format_html` (used by `last_execution_status`) is
+on 'SimpleNamespace'-style mocks so the tests stay fast and never
+touch a real DB. 'format_html' (used by 'last_execution_status') is
 imported at module load time, so it stays real.
 """
 
@@ -40,8 +40,8 @@ def factory():
 
 
 def test_base_user_filtered_admin_filters_by_created_by():
-    """`get_queryset` must filter by `bot__created_by_id = request.user.id`
-    AND `select_related` the `bot__created_by`."""
+    """'get_queryset' must filter by 'bot__created_by_id = request.user.id'
+    AND 'select_related' the 'bot__created_by'."""
 
     parent_qs = MagicMock(name="parent_qs")
     parent_qs.filter.return_value = parent_qs
@@ -98,7 +98,7 @@ def test_ollama_admin_has_add_permission_false_when_row_exists():
 
 def test_ollama_admin_save_model_triggers_summary_on_num_ctx_change():
     """When num_ctx changes on an existing Ollama row, we must queue a
-    `manage_conversation_summary` task."""
+    'manage_conversation_summary' task."""
 
     admin_inst = OllamaAdmin(Ollama, django_admin.site)
     req = SimpleNamespace(user=SimpleNamespace(id=1, is_superuser=False))
@@ -118,7 +118,7 @@ def test_ollama_admin_save_model_triggers_summary_on_num_ctx_change():
 
 
 def test_ollama_admin_save_model_does_not_trigger_on_unrelated_change():
-    """Changing fields other than `num_ctx` must NOT queue the summary task."""
+    """Changing fields other than 'num_ctx' must NOT queue the summary task."""
 
     admin_inst = OllamaAdmin(Ollama, django_admin.site)
     req = SimpleNamespace(user=SimpleNamespace(id=1, is_superuser=False))
@@ -163,8 +163,8 @@ def test_ollama_admin_save_model_does_not_trigger_on_new_instance():
 def test_bot_admin_get_queryset_filters_by_user_and_annotates():
     """`BotAdmin.get_queryset` must:
     - filter to the current user's bots only,
-    - `select_related` created_by,
-    - `prefetch_related` bot_logs,
+    - 'select_related' created_by,
+    - 'prefetch_related' bot_logs,
     - annotate the various counts/subqueries.
     """
 
@@ -200,7 +200,7 @@ def test_bot_admin_get_queryset_filters_by_user_and_annotates():
 
 
 def test_bot_admin_save_model_sets_current_user():
-    """`save_model` must associate the request user as `created_by`."""
+    """'save_model' must associate the request user as 'created_by'."""
 
     admin_inst = BotAdmin(Bot, django_admin.site)
     user = SimpleNamespace(id=11, is_superuser=False, username="me")
@@ -348,7 +348,7 @@ def test_bot_admin_get_stats_includes_table_when_obj_present():
 
 def test_bot_admin_last_execution_status_dash_when_no_log():
     admin_inst = BotAdmin(Bot, django_admin.site)
-    # No `last_log_id` attr ⇒ must return "-".
+    # No 'last_log_id' attr ⇒ must return "-".
     assert admin_inst.last_execution_status(None) == "-"
     obj = SimpleNamespace(last_log_id=None)
     assert admin_inst.last_execution_status(obj) == "-"

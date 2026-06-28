@@ -1,12 +1,10 @@
-"""Tests for `src/utils/formatting.py` (Tier 1 — pure logic)."""
+"""Tests for 'src/utils/formatting.py'."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-
 from utils.formatting import convert_messages_to_ollama_format, get_admin_link
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -49,9 +47,7 @@ def test_convert_messages_skips_system_role_messages():
 
 def test_convert_messages_prepends_system_prompt_when_provided():
     messages = [_msg("U", "ping")]
-    result = convert_messages_to_ollama_format(
-        messages, system_prompt="You are helpful."
-    )
+    result = convert_messages_to_ollama_format(messages, system_prompt="You are helpful.")
     assert result[0] == {"role": "system", "content": "You are helpful."}
     assert result[1:] == [{"role": "user", "content": "ping"}]
 
@@ -91,9 +87,7 @@ def test_get_admin_link_renders_anchor_with_model_and_id():
     obj = SimpleNamespace(id="bot-uuid-123")
     link = get_admin_link("message", 42, obj)
 
-    assert link == (
-        "<a href='/admin/app/message/?bot_id=bot-uuid-123' target='_blank'>42</a>"
-    )
+    assert link == ("<a href='/admin/app/message/?bot_id=bot-uuid-123' target='_blank'>42</a>")
 
 
 def test_get_admin_link_uses_stringified_id_in_href():

@@ -1,7 +1,7 @@
-"""Tests for `src/services/conversation_summary.py` (Tier 3).
+"""Tests for 'src/services/conversation_summary.py'.
 
-ConversationSummaryService reads `bot.conversations` and
-`bot.system_messages` directly (set via Prefetch in `app.tasks`), so
+ConversationSummaryService reads 'bot.conversations' and
+'bot.system_messages' directly (set via Prefetch in 'app.tasks'), so
 we synthesise those attributes in the test fixtures.
 """
 
@@ -10,11 +10,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
 from app.choices import MessageRole
 from services.conversation_summary import ConversationSummaryService
 from strings import SUMMARY_UNAVAILABLE
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -54,9 +52,7 @@ def _ollama_client():
 
 
 def test_process_returns_none_when_no_conversations():
-    svc = ConversationSummaryService(
-        _bot(conversations=[]), _ollama(), _ollama_client()
-    )
+    svc = ConversationSummaryService(_bot(conversations=[]), _ollama(), _ollama_client())
     assert svc.process() is None
 
 

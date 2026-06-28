@@ -1,11 +1,11 @@
-"""Local conftest for `src/tests/test_clients/`.
+"""Local conftest for 'src/tests/test_clients/'.
 
-The `mcp` SDK package is only available inside the project's Docker image.
+The 'mcp' SDK package is only available inside the project's Docker image.
 Outside of Docker (local dev / CI workers without Docker) we install
-lightweight stand-ins into `sys.modules` so `from mcp import ...` succeeds
+lightweight stand-ins into 'sys.modules' so 'from mcp import ...' succeeds
 and we can patch individual SDK symbols from each test.
 
-Mirrors the `pgvector` shim in `whimsybots/settings/test.py`.
+Mirrors the 'pgvector' shim in 'whimsybots/settings/test.py'.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def _install_mcp_stub() -> None:
     if "mcp" in sys.modules:
         return
 
-    # Top-level `mcp` package.
+    # Top-level 'mcp' package.
     mcp_pkg = ModuleType("mcp")
 
     class _ClientSession:

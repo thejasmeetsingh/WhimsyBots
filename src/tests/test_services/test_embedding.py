@@ -1,7 +1,7 @@
-"""Tests for `src/services/embedding.py` (Tier 3).
+"""Tests for 'src/services/embedding.py'.
 
 EmbeddingService is the boundary between the ORM and Ollama's embedding
-API. Most tests patch `OllamaClient` to avoid real HTTP calls.
+API. Most tests patch 'OllamaClient' to avoid real HTTP calls.
 """
 
 from __future__ import annotations
@@ -9,9 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
 from services.embedding import EmbeddingService
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -122,9 +120,7 @@ def test_build_text_for_mcp_server_skips_malformed_tool_configs():
 
 
 def test_build_text_for_mcp_server_concatenates_multiple_tools():
-    cfg1 = SimpleNamespace(
-        tool={"function": {"name": "tool_a", "description": "alpha"}}
-    )
+    cfg1 = SimpleNamespace(tool={"function": {"name": "tool_a", "description": "alpha"}})
     cfg2 = SimpleNamespace(tool={"function": {"name": "tool_b", "description": "beta"}})
     with patch(
         "services.embedding.MCPToolsBuilder.build_tools_from_servers",
@@ -160,9 +156,7 @@ def test_generate_returns_vector_on_success():
 def test_generate_returns_none_on_exception():
     svc = EmbeddingService(bot=_bot(), ollama=_ollama())
     with patch("services.embedding.OllamaClient") as Client:
-        Client.return_value.generate_embeddings.side_effect = RuntimeError(
-            "ollama down"
-        )
+        Client.return_value.generate_embeddings.side_effect = RuntimeError("ollama down")
         result = svc._generate("hello")
     assert result is None
 
@@ -183,25 +177,19 @@ def test_generate_passes_ollama_endpoint_and_api_key_to_client():
 
 def test_save_message_embedding_returns_false_for_empty_content():
     svc = EmbeddingService(bot=_bot(), ollama=_ollama())
-    msg = SimpleNamespace(
-        id="m-1", content="   ", content_embedding=None, save=MagicMock()
-    )
+    msg = SimpleNamespace(id="m-1", content="   ", content_embedding=None, save=MagicMock())
     assert svc.save_message_embedding(msg) is False
 
 
 def test_save_message_embedding_returns_false_for_missing_model():
     svc = EmbeddingService(bot=_bot(embedding_model=""), ollama=_ollama())
-    msg = SimpleNamespace(
-        id="m-1", content="hi", content_embedding=None, save=MagicMock()
-    )
+    msg = SimpleNamespace(id="m-1", content="hi", content_embedding=None, save=MagicMock())
     assert svc.save_message_embedding(msg) is False
 
 
 def test_save_message_embedding_returns_false_when_generate_fails():
     svc = EmbeddingService(bot=_bot(), ollama=_ollama())
-    msg = SimpleNamespace(
-        id="m-1", content="hi", content_embedding=None, save=MagicMock()
-    )
+    msg = SimpleNamespace(id="m-1", content="hi", content_embedding=None, save=MagicMock())
     with patch.object(svc, "_generate", return_value=None):
         assert svc.save_message_embedding(msg) is False
     msg.save.assert_not_called()
@@ -209,9 +197,7 @@ def test_save_message_embedding_returns_false_when_generate_fails():
 
 def test_save_message_embedding_persists_vector_on_success():
     svc = EmbeddingService(bot=_bot(), ollama=_ollama())
-    msg = SimpleNamespace(
-        id="m-1", content="hi", content_embedding=None, save=MagicMock()
-    )
+    msg = SimpleNamespace(id="m-1", content="hi", content_embedding=None, save=MagicMock())
     with patch.object(svc, "_generate", return_value=[0.1, 0.2]):
         result = svc.save_message_embedding(msg)
     assert result is True
@@ -221,9 +207,7 @@ def test_save_message_embedding_persists_vector_on_success():
 
 def test_save_message_embedding_returns_false_on_save_exception():
     svc = EmbeddingService(bot=_bot(), ollama=_ollama())
-    msg = SimpleNamespace(
-        id="m-1", content="hi", content_embedding=None, save=MagicMock()
-    )
+    msg = SimpleNamespace(id="m-1", content="hi", content_embedding=None, save=MagicMock())
     msg.save.side_effect = RuntimeError("db down")
     with patch.object(svc, "_generate", return_value=[0.1]):
         assert svc.save_message_embedding(msg) is False

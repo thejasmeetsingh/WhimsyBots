@@ -1,12 +1,12 @@
-"""Tests for `src/cron_job/db.py` (Tier 6 — DB module).
+"""Tests for 'src/cron_job/db.py'.
 
-`_build_db_url()` is a pure function: it reads from `os.environ` and
-returns a URL string. `get_session()` is an async context manager
-that wraps an `AsyncSession` and rolls back on `SQLAlchemyError`.
+'_build_db_url()' is a pure function: it reads from 'os.environ' and
+returns a URL string. 'get_session()' is an async context manager
+that wraps an 'AsyncSession' and rolls back on 'SQLAlchemyError'.
 
-The module's top-level imports call `_build_db_url()` once and bind
-the result to a module-level engine — so we test `_build_db_url` in
-isolation (with patched env vars) and `get_session` via mocks for the
+The module's top-level imports call '_build_db_url()' once and bind
+the result to a module-level engine — so we test '_build_db_url' in
+isolation (with patched env vars) and 'get_session' via mocks for the
 async machinery.
 """
 
@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ──────────────────────────────────────────────
 # _build_db_url
 # ──────────────────────────────────────────────
@@ -28,7 +27,7 @@ def _build_db_url(**env):
     """Re-import the helper against a controlled environment.
 
     Importing the module triggers a top-level engine build, so we test
-    `_build_db_url` by reloading the module with mocked env vars.
+    '_build_db_url' by reloading the module with mocked env vars.
     """
 
     # Save and clear all DB_* env vars first.
@@ -109,7 +108,7 @@ def test_build_db_url_error_message_mentions_all_required_vars():
 
 @pytest.mark.asyncio
 async def test_get_session_yields_a_session():
-    """`get_session` must yield an `AsyncSession` and close on exit."""
+    """'get_session' must yield an 'AsyncSession' and close on exit."""
 
     from cron_job.db import get_session
 
@@ -117,7 +116,7 @@ async def test_get_session_yields_a_session():
     fake_session.close = AsyncMock()
 
     # The source uses `async with AsyncSessionLocal() as session:`.
-    # We mock `AsyncSessionLocal` so its __aenter__ returns our fake_session
+    # We mock 'AsyncSessionLocal' so its __aenter__ returns our fake_session
     # and __aexit__ calls close.
     enter = AsyncMock(return_value=fake_session)
     exit_ = AsyncMock(return_value=None)
@@ -157,7 +156,7 @@ async def test_get_session_closes_session_even_on_success():
 
 @pytest.mark.asyncio
 async def test_get_session_rolls_back_on_sqlalchemy_error():
-    """A `SQLAlchemyError` inside the `with` block must trigger a
+    """A 'SQLAlchemyError' inside the 'with' block must trigger a
     `session.rollback()` AND re-raise the error."""
 
     from sqlalchemy.exc import SQLAlchemyError
@@ -180,7 +179,7 @@ async def test_get_session_rolls_back_on_sqlalchemy_error():
                 raise SQLAlchemyError("db boom")
 
     fake_session.rollback.assert_awaited_once()
-    # And the session is still closed in `finally`.
+    # And the session is still closed in 'finally'.
     fake_session.close.assert_awaited_once()
 
 

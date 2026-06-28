@@ -1,12 +1,10 @@
-"""Tests for `src/utils/telegram.py` (Tier 1 — pure logic)."""
+"""Tests for 'src/utils/telegram.py'."""
 
 from __future__ import annotations
 
 from typing import Any, Dict
 
-
 from utils.telegram import parse_telegram_update
-
 
 # ──────────────────────────────────────────────
 # helpers
@@ -82,7 +80,7 @@ def test_parse_telegram_update_preserves_string_chat_id():
 
 
 def test_parse_telegram_update_defaults_missing_username_and_first_name():
-    # No `from` block ⇒ empty defaults rather than a KeyError.
+    # No 'from' block ⇒ empty defaults rather than a KeyError.
     payload = {
         "update_id": 5,
         "message": {"chat": {"id": 1}, "text": "ping", "date": 0},

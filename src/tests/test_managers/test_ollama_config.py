@@ -1,7 +1,7 @@
-"""Tests for `src/managers/ollama_config.py` (Tier 2 - service logic with mocks).
+"""Tests for 'src/managers/ollama_config.py'.
 
 The class caches the Ollama config at module level, so every test
-needs an `autouse` fixture to reset that cache before each run.
+needs an 'autouse' fixture to reset that cache before each run.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from managers.ollama_config import OllamaConfigManager
-
 
 # ──────────────────────────────────────────────
 # cache reset fixture
@@ -50,9 +49,7 @@ def test_get_ollama_config_caches_after_first_call():
     rather than hitting the DB again."""
 
     ollama_cfg = object()
-    with patch(
-        "app.models.Ollama.objects.first", return_value=ollama_cfg
-    ) as mock_first:
+    with patch("app.models.Ollama.objects.first", return_value=ollama_cfg) as mock_first:
         OllamaConfigManager.get_ollama_config()
         OllamaConfigManager.get_ollama_config()
         OllamaConfigManager.get_ollama_config()
