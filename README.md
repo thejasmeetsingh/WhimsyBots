@@ -187,9 +187,8 @@ WhimsyBots/
 # Run the full suite
 make test
 
-# Verbose, with coverage, or a single test:
+# Verbose or a single test:
 make test-verbose
-make test-coverage
 make test-specific FILE=test_app/test_models.py::TestBot::test_str
 ```
 
@@ -205,4 +204,4 @@ PRs welcome. Please read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for project 
 
 ## 📄 License
 
-[MIT](LICENSE) — Copyright © 2026 Jasmeet Singh.
+This project is licensed under the [MIT LICENSE](LICENSE)
