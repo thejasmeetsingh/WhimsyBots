@@ -1,5 +1,4 @@
-"""
-Token Budget Service — treats the context window like OS RAM.
+"""Token Budget Service — treats the context window like OS RAM.
 
 Priority (most protected → truncated first):
   1. Patterns       — protected, capped at 4096 chars by design
@@ -71,6 +70,8 @@ assert abs(sum(ALLOCATION_RATIOS.values()) - 1.0) < 1e-9, "Ratios must sum to 1.
 
 
 class TokenBudget(BaseModel):
+    """Pydantic model carrying the computed token budget for one cycle."""
+
     # Raw inputs
     num_ctx: int
     output_reservation: int
@@ -96,6 +97,7 @@ class TokenBudget(BaseModel):
     allocation_breakdown: dict[str, int]
 
     def log_summary(self) -> None:
+        """Emit a structured info log summarizing the computed budget."""
         logger.info(
             {
                 "msg": "TokenBudget computed",
@@ -113,8 +115,7 @@ class TokenBudget(BaseModel):
 
 
 class TokenBudgetService:
-    """
-    Computes a TokenBudget for a single message processing cycle.
+    """Computes a TokenBudget for a single message processing cycle.
 
     Usage:
         budget = TokenBudgetService.compute(ollama_config, tool_definitions)
@@ -127,16 +128,17 @@ class TokenBudgetService:
         ollama_config: "Ollama",
         tool_definitions: list[dict[str, Any]],
     ) -> TokenBudget:
-        """
-        Steps:
-          1. Start with num_ctx
-          2. Subtract output reservation (num_predict or default)
-          3. Subtract estimated tool definition tokens (MCP tools are verbose JSON)
-          4. Subtract fixed overhead (StructuredOutput schema + base instructions)
-          5. Compute recommended_tool_count from num_ctx + existing allocations
-          6. Split remainder across system_prompt / patterns / embeddings / history / tool_responses
-        """
+        """Compute the per-cycle token budget.
 
+        Steps:
+            1. Start with num_ctx.
+            2. Subtract output reservation (num_predict or default).
+            3. Subtract estimated tool definition tokens (MCP tools are verbose JSON).
+            4. Subtract fixed overhead (StructuredOutput schema + base instructions).
+            5. Compute recommended_tool_count from num_ctx + existing allocations.
+            6. Split remainder across system_prompt / patterns / embeddings
+               / history / tool_responses.
+        """
         num_ctx = max(ollama_config.num_ctx or 4096, 4096)
 
         # --- Step 2: Output reservation ---
@@ -181,8 +183,7 @@ class TokenBudgetService:
 
         # --- Step 6: Proportional allocation ---
         allocations = {
-            source: int(usable_tokens * ratio)
-            for source, ratio in ALLOCATION_RATIOS.items()
+            source: int(usable_tokens * ratio) for source, ratio in ALLOCATION_RATIOS.items()
         }
 
         budget = TokenBudget(
@@ -206,11 +207,10 @@ class TokenBudgetService:
 
     @staticmethod
     def truncate_text(text: str, char_limit: int, suffix: str = "…") -> str:
-        """
-        Hard-truncate text to char_limit, appending suffix if truncated.
+        """Hard-truncate text to char_limit, appending suffix if truncated.
+
         Used for system_prompt and patterns.
         """
-
         if not text or len(text) <= char_limit:
             return text
 
@@ -222,14 +222,14 @@ class TokenBudgetService:
         messages: list[Message],  # list of Message ORM objects, newest-first
         token_budget: int,
     ) -> list[Message]:
-        """
+        """Keep newest messages until the token budget is exhausted.
+
         Walk backwards through messages (newest → oldest), accumulating
         token cost until the budget is exhausted. Returns the kept subset
         in chronological order (oldest → newest) for correct LLM context.
 
         This is the "drop oldest first" strategy for history.
         """
-
         kept: list[Message] = []
         tokens_used = 0
 
@@ -250,12 +250,11 @@ class TokenBudgetService:
         ],  # list of (Message, similarity_score), highest score first
         char_budget: int,
     ) -> list[tuple[Message, float]]:
-        """
-        Include embeddings from highest similarity downward until char_budget
-        is exhausted. Lowest-similarity results are dropped first naturally
-        since they appear at the end of the ranked list.
-        """
+        """Include embeddings from highest similarity downward until exhausted.
 
+        Lowest-similarity results are dropped first naturally since they
+        appear at the end of the ranked list.
+        """
         kept: list[tuple[Message, float]] = []
         chars_used = 0
 
@@ -271,8 +270,8 @@ class TokenBudgetService:
 
     @staticmethod
     def truncate_tool_response(response: str, char_budget: int) -> str:
-        """
-        Truncate a single MCP tool response to char_budget.
+        """Truncate a single MCP tool response to char_budget.
+
         Appends a note so the LLM knows the response was clipped.
         """
         if len(response) <= char_budget:
@@ -282,7 +281,8 @@ class TokenBudgetService:
 
     @classmethod
     def _measure_tool_def_tokens(cls, tool_definitions: list[dict[str, Any]]) -> int:
-        """
+        """Measure the actual serialized token cost of the tool definitions.
+
         Measures the actual serialized token cost of tool definitions
         rather than estimating. Uses a tighter chars/token ratio for JSON
         plus a safety buffer to account for tokenizer variance across models.
@@ -290,7 +290,6 @@ class TokenBudgetService:
         This ensures tool definitions are fully reserved and never enter
         the truncation pool — partial tool schemas cause Ollama validation errors.
         """
-
         if not tool_definitions:
             return 0
 
@@ -306,7 +305,8 @@ class TokenBudgetService:
         already_measured_tool_def_tokens: int,
         tool_definitions: list[dict[str, Any]],
     ) -> int:
-        """
+        """Derive the maximum number of MCP tools we can safely host.
+
         Derives the maximum number of MCP tool definitions we can safely
         host in the context window given num_ctx and the fixed reservations
         (output, overhead).
@@ -319,11 +319,10 @@ class TokenBudgetService:
             current request.
 
         If the *actual* measured cost of the current tool set already
-        exceeds what `headroom` can support, log a warning so the operator
+        exceeds what 'headroom' can support, log a warning so the operator
         sees the context is over-budget (the returned count is still
         floored at the current size to keep the request intact).
         """
-
         headroom = num_ctx - output_reservation - FIXED_OVERHEAD_TOKENS
         currently_used = len(tool_definitions)
 

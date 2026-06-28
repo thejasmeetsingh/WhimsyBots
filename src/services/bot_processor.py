@@ -1,11 +1,11 @@
-"""Bot message processor service"""
+"""Bot message processor service."""
 
 import asyncio
 import logging
 from typing import Optional
 
-from pydantic import ValidationError
 from pgvector.django import CosineDistance
+from pydantic import ValidationError
 
 from app.choices import MessageRole
 from app.models import Bot, CronJob, MCPServer, Message, Ollama
@@ -20,18 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 class BotMessageProcessor:
-    """Service for processing bot messages with Ollama and tools"""
+    """Service for processing bot messages with Ollama and tools."""
 
     def __init__(self, bot: Bot, ollama: Ollama, ollama_client: OllamaClient):
-        """
-        Initialize the processor.
+        """Initialize the processor.
 
         Args:
             bot: Bot instance
             ollama: Ollama configuration
             ollama_client: Configured OllamaClient
         """
-
         self.bot = bot
         self.ollama = ollama
         self.ollama_client = ollama_client
@@ -42,8 +40,7 @@ class BotMessageProcessor:
         query_vector: Optional[list[float]] = None,
         servers_to_exclude: Optional[set[str]] = None,
     ) -> list[MCPToolConfig]:
-        """
-        Build the list of MCP tool configurations available to the bot.
+        """Build the list of MCP tool configurations available to the bot.
 
         Starts from MCP servers scoped to the bot, optionally re-ranks them
         by semantic similarity to 'query_vector' (closest descriptions first),
@@ -63,7 +60,6 @@ class BotMessageProcessor:
             The list of 'MCPToolConfig' objects built from the selected
             servers, in the same order used for tool selection.
         """
-
         # Build tools from servers
         mcp_servers = MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
 
@@ -86,15 +82,12 @@ class BotMessageProcessor:
                 )
             )
 
-        tools_config = asyncio.run(
-            MCPToolsBuilder.build_tools_from_servers(mcp_server_list)
-        )
+        tools_config = asyncio.run(MCPToolsBuilder.build_tools_from_servers(mcp_server_list))
 
         return tools_config
 
     def process_message(self, message: Message) -> tuple[str, Optional[int]]:
-        """
-        Process message with tool calling loop.
+        """Process message with tool calling loop.
 
         Args:
             message (Message): Latest user message object
@@ -103,15 +96,12 @@ class BotMessageProcessor:
             response: LLM Response
             ollama_ms: total duration taken by ollama
         """
-
         try:
             context_assembler_svc = ContextAssembler(
                 bot=self.bot, ollama=self.ollama, current_message=message
             )
 
-            tools_config = self._get_tools_config(
-                query_vector=message.content_embedding
-            )
+            tools_config = self._get_tools_config(query_vector=message.content_embedding)
 
             context = context_assembler_svc.assemble(
                 tool_definitions=[tool_config.tool for tool_config in tools_config]
@@ -142,8 +132,7 @@ class BotMessageProcessor:
             raise
 
     def process_cron_job(self, cron_job: CronJob) -> tuple[str, Optional[int]]:
-        """
-        Process cron job with tool calling loop.
+        """Process cron job with tool calling loop.
 
         Args:
             cron_job (CronJob): CronJob instance
@@ -152,7 +141,6 @@ class BotMessageProcessor:
             response: LLM Response
             ollama_ms: total duration taken by ollama
         """
-
         try:
             # Remove 'cron_job' MCP server
             tools_config = self._get_tools_config(
@@ -191,13 +179,11 @@ class BotMessageProcessor:
             raise
 
     def send_response(self, response: str) -> None:
-        """
-        Send response to user and save to database.
+        """Send response to user and save to database.
 
         Args:
             response: The response text to send
         """
-
         try:
             self.telegram_client.send_message(text=response)
 

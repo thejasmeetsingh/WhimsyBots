@@ -1,4 +1,4 @@
-"""Conversation Summary Service"""
+"""Conversation Summary Service."""
 
 import asyncio
 import logging
@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationSummaryService:
-    """
-    Handles context window management for a single bot.
+    """Handles context window management for a single bot.
 
     Determines whether the bot's message history exceeds its token budget
     (sourced from TokenBudgetService), and if so summarizes the overflow
@@ -35,6 +34,13 @@ class ConversationSummaryService:
         ollama: Ollama,
         ollama_client: OllamaClient,
     ):
+        """Initialize the service with bound bot, Ollama config, and client.
+
+        Args:
+            bot: Bot instance.
+            ollama: Ollama configuration.
+            ollama_client: Configured OllamaClient for the summary call.
+        """
         self.bot = bot
         self.ollama = ollama
         self.ollama_client = ollama_client
@@ -50,22 +56,17 @@ class ConversationSummaryService:
         default_servers = MCPServer.get_default_mcp_servers()
         mcp_servers.extend(list(default_servers.values()))
 
-        tools_config = asyncio.run(
-            MCPToolsBuilder.build_tools_from_servers(mcp_servers)
-        )
+        tools_config = asyncio.run(MCPToolsBuilder.build_tools_from_servers(mcp_servers))
 
         # Derive the history token budget the same way ContextAssembler does,
         # so the split point here is always consistent with what gets sent to
         # the LLM during message processing.
-        budget = TokenBudgetService.compute(
-            self.ollama, [tool.tool for tool in tools_config]
-        )
+        budget = TokenBudgetService.compute(self.ollama, [tool.tool for tool in tools_config])
         self.history_token_budget = budget.history_tokens
         self.summary_chars = budget.summary_chars
 
     def process(self) -> Optional[tuple[Message, bool]]:
-        """
-        Evaluate the bot's message history against the history token budget.
+        """Evaluate the bot's message history against the history token budget.
 
         If history exceeds the budget, summarizes the overflow into a single
         Message(role='S') record. If history fits within the budget,
@@ -74,7 +75,6 @@ class ConversationSummaryService:
         Returns:
             (Message, created: bool) where Message has role='S', or None.
         """
-
         conversations = getattr(self.bot, "conversations")
         if not conversations:
             return None
@@ -121,10 +121,9 @@ class ConversationSummaryService:
 
         return summary_msg, created
 
-    def _split_by_budget(
-        self, messages: list[Message]
-    ) -> tuple[list[Message], list[Message]]:
-        """
+    def _split_by_budget(self, messages: list[Message]) -> tuple[list[Message], list[Message]]:
+        """Split messages into in-window and overflowed lists.
+
         Delegates the budget-aware split to TokenBudgetService so the logic
         is never duplicated. Messages that fit within history_token_budget
         form the 'in_window' list; everything older is 'overflowed'.
@@ -135,7 +134,6 @@ class ConversationSummaryService:
         Returns:
             (in_window, overflowed) — both in chronological order.
         """
-
         in_window = TokenBudgetService.fit_messages_to_token_budget(
             messages=messages,
             token_budget=self.history_token_budget,
@@ -146,11 +144,8 @@ class ConversationSummaryService:
 
         return in_window, overflowed
 
-    def _summarize(
-        self, messages: list[Message], summary_msg: Optional[Message]
-    ) -> Optional[str]:
-        """
-        Calls Ollama to produce a summary of the overflowed messages.
+    def _summarize(self, messages: list[Message], summary_msg: Optional[Message]) -> Optional[str]:
+        """Calls Ollama to produce a summary of the overflowed messages.
 
         Args:
             messages:    Overflow messages to summarize (chronological order).
@@ -159,7 +154,6 @@ class ConversationSummaryService:
         Returns:
             Summary text string, or None if the call fails.
         """
-
         formatted = "\n".join(
             f"{'User' if m.role == MessageRole.USER.value[0] else 'Assistant'}: {m.content}"
             for m in messages

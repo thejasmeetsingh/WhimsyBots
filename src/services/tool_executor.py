@@ -1,4 +1,4 @@
-"""Tool executor service and related data structures"""
+"""Tool executor service and related data structures."""
 
 import asyncio
 import logging
@@ -15,15 +15,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MCPToolConfig:
-    """Configuration for an MCP tool"""
+    """Configuration for an MCP tool."""
 
     tool: Dict[str, Any]
     config: Dict[str, Any]
     transport_type: str
 
     def get_transport(self) -> str:
-        """Determine transport type from config"""
-
+        """Determine transport type from config."""
         return (
             MCPTransportType.REMOTE.value[0]
             if self.config.get("url")
@@ -32,14 +31,13 @@ class MCPToolConfig:
 
 
 class MCPToolsBuilder:
-    """Service for building and configuring MCP tools"""
+    """Service for building and configuring MCP tools."""
 
     @staticmethod
     async def build_tools_from_servers(
         mcp_servers: list[MCPServer],
     ) -> List[MCPToolConfig]:
-        """
-        Build MCPToolConfig instances from bot MCP servers.
+        """Build MCPToolConfig instances from bot MCP servers.
 
         Args:
             mcp_servers: QuerySet of active MCP servers
@@ -47,7 +45,6 @@ class MCPToolsBuilder:
         Returns:
             List of MCPToolConfig instances
         """
-
         tools: list[MCPToolConfig] = []
 
         for server in mcp_servers:
@@ -58,9 +55,7 @@ class MCPToolsBuilder:
                 mcp_tools = await mcp_client(transport_type, config)
                 for tool in mcp_tools:
                     tools.append(
-                        MCPToolConfig(
-                            tool=tool, config=config, transport_type=transport_type
-                        )
+                        MCPToolConfig(tool=tool, config=config, transport_type=transport_type)
                     )
             except Exception as _:
                 logger.error(
@@ -73,8 +68,7 @@ class MCPToolsBuilder:
 
     @staticmethod
     def _build_server_config(server: MCPServer) -> Dict[str, Any]:
-        """Build configuration dictionary from MCP server"""
-
+        """Build configuration dictionary from MCP server."""
         if server.transport == MCPTransportType.LOCAL.value[0]:
             return {
                 "command": server.command,
@@ -86,27 +80,23 @@ class MCPToolsBuilder:
 
     @staticmethod
     def _get_transport_type(server: MCPServer) -> str:
-        """Get transport type from server"""
-
+        """Get transport type from server."""
         return server.transport
 
 
 class ToolExecutor:
-    """Service for executing MCP tools"""
+    """Service for executing MCP tools."""
 
     def __init__(self, tools: List[MCPToolConfig]):
-        """
-        Initialize the executor.
+        """Initialize the executor.
 
         Args:
             tools: List of MCPToolConfig instances
         """
-
         self.tools = tools
 
     def find_tool_by_call(self, tool_call: Dict[str, Any]) -> Optional[MCPToolConfig]:
-        """
-        Find a tool matching the given tool call.
+        """Find a tool matching the given tool call.
 
         Args:
             tool_call: The tool call from Ollama response
@@ -114,7 +104,6 @@ class ToolExecutor:
         Returns:
             MCPToolConfig if found, None otherwise
         """
-
         tool_name = tool_call.get("name")
 
         for tool in self.tools:
@@ -127,11 +116,11 @@ class ToolExecutor:
     async def execute_tool(
         self, tool_config: MCPToolConfig, payload: Dict[str, Any] | None = None
     ) -> str:
-        """
-        Execute an MCP tool and return the result.
+        """Execute an MCP tool and return the result.
 
         Args:
-            tool_config: The tool configuration to execute
+            tool_config: The tool configuration to execute.
+            payload: Optional arguments dict forwarded to the tool.
 
         Returns:
             String result from tool execution
@@ -139,11 +128,8 @@ class ToolExecutor:
         Raises:
             Exception: If tool execution fails
         """
-
         try:
-            response = await mcp_client(
-                tool_config.get_transport(), tool_config.config, payload
-            )
+            response = await mcp_client(tool_config.get_transport(), tool_config.config, payload)
 
             if response.get("isError"):
                 logger.warning("Tool execution returned error: %s", response)
@@ -162,8 +148,7 @@ class ToolExecutor:
             raise
 
     def execute_tool_call_sync(self, tool_call: Dict[str, Any]) -> Optional[str]:
-        """
-        Execute a tool call synchronously.
+        """Execute a tool call synchronously.
 
         Args:
             tool_call: The tool call from Ollama response
@@ -171,7 +156,6 @@ class ToolExecutor:
         Returns:
             Tool result string, or None if tool not found
         """
-
         tool_config = self.find_tool_by_call(tool_call)
         if not tool_config:
             logger.warning("Tool not found for call: %s", tool_call.get("name"))

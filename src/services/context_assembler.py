@@ -1,6 +1,4 @@
-"""
-ContextAssembler — builds the final system prompt and history payload
-that gets sent to Ollama for each message processing cycle.
+"""ContextAssembler — builds the final system prompt and history payload.
 
 This is the single place where all context sources are gathered,
 truncated, and assembled in priority order.
@@ -23,11 +21,11 @@ from pydantic import BaseModel
 
 from app.choices import MessageRole
 from app.models import Bot, Message, Ollama
-from utils.formatting import convert_messages_to_ollama_format
 from prompts import DEFAULT_SYSTEM_PROMPT
 from services.embedding import EmbeddingService
 from services.token_budget import TokenBudget, TokenBudgetService
 from strings import SUMMARY_UNAVAILABLE
+from utils.formatting import convert_messages_to_ollama_format
 
 logger = logging.getLogger(__name__)
 
@@ -39,23 +37,23 @@ RECENT_MESSAGES_CAP: int = 200
 
 
 class AssembledContext(BaseModel):
-    history: list[
-        dict[str, str]
-    ]  # Ollama-formatted message dicts [{"role": ..., "content": ...}]
+    """Pydantic model holding the final context handed to the LLM."""
+
+    history: list[dict[str, str]]  # Ollama-formatted message dicts [{"role": ..., "content": ...}]
     budget: TokenBudget  # Carried through for logging / debugging
 
 
 class ContextAssembler:
+    """Orchestrates system-prompt assembly and history fitting."""
+
     def __init__(self, bot: Bot, ollama: Ollama, current_message: Message):
-        """
-        Initialize the processor.
+        """Initialize the processor.
 
         Args:
             bot: Bot instance
             ollama: Ollama configuration
             current_message: Current Message
         """
-
         self.bot = bot
         self.ollama = ollama
         self.current_message = current_message
@@ -64,14 +62,14 @@ class ContextAssembler:
         self,
         tool_definitions: list[dict[str, Any]],
     ) -> AssembledContext:
-        """
-        Full pipeline:
-          1. Compute token budget
-          2. Fetch + fit each context source within its budget
-          3. Assemble system prompt string
-          4. Fit conversation history to token budget
-        """
+        """Run the full context-assembly pipeline.
 
+        Steps:
+            1. Compute token budget.
+            2. Fetch + fit each context source within its budget.
+            3. Assemble system prompt string.
+            4. Fit conversation history to token budget.
+        """
         # Fetch messages
         messages = Message.objects.filter(bot_id=self.bot.id)
 
@@ -142,12 +140,12 @@ class ContextAssembler:
         )
 
     def _fit_patterns(self, budget: TokenBudget) -> str:
-        """
+        """Render the observed-patterns block, truncating to fit the budget.
+
         Patterns are always protected — they're already capped at 4096 chars
         during generation (see ObservedPatternsService). We still apply
         budget.patterns_chars as a secondary safety net.
         """
-
         if not self.bot.observed_patterns:
             return ""
 
@@ -163,11 +161,11 @@ class ContextAssembler:
         budget: TokenBudget,
         top_k: int = 5,
     ) -> str:
-        """
+        """Retrieve top-k past messages that fit the embedding budget.
+
         Retrieve top-k semantically similar past USER messages, then drop
         lowest-similarity results until they fit within embedding_chars.
         """
-
         if budget.embedding_chars <= 0:
             return ""
 
@@ -206,16 +204,15 @@ class ContextAssembler:
         messages: list[Message],
         system_prompt: Optional[str] = None,
     ) -> list[dict[str, str]]:
-        """
-        Walk newest→oldest for the given messages, keep until history_tokens budget is exhausted.
-        Returns Ollama-formatted dicts in chronological order.
-        """
+        """Fit conversation history into the history-token budget.
 
+        Walks newest→oldest for the given messages and keeps them until
+        the history_tokens budget is exhausted. Returns Ollama-formatted
+        dicts in chronological order.
+        """
         fitted = TokenBudgetService.fit_messages_to_token_budget(
             messages=messages,
             token_budget=budget.history_tokens,
         )
 
-        return convert_messages_to_ollama_format(
-            messages=fitted, system_prompt=system_prompt
-        )
+        return convert_messages_to_ollama_format(messages=fitted, system_prompt=system_prompt)

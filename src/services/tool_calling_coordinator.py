@@ -1,4 +1,4 @@
-"""Tool calling coordinator for Ollama with MCP tools"""
+"""Tool calling coordinator for Ollama with MCP tools."""
 
 import logging
 from typing import Any, Optional
@@ -18,8 +18,7 @@ def run_tool_calling_loop(
     ollama: Ollama,
     add_keep_alive: bool = False,
 ) -> tuple[str, Optional[int]]:
-    """
-    Execute the tool calling loop with Ollama and MCP tools.
+    """Execute the tool calling loop with Ollama and MCP tools.
 
     Args:
         ollama_client: Configured OllamaClient instance
@@ -36,7 +35,6 @@ def run_tool_calling_loop(
     Raises:
         Exception: If the tool calling loop fails
     """
-
     try:
         tool_executor = ToolExecutor(tools_config)
 

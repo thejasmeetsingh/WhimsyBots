@@ -1,5 +1,4 @@
-"""
-Telegram update handler service for processing incoming messages.
+"""Telegram update handler service for processing incoming messages.
 
 Handles parsing Telegram updates, creating message records, and queuing
 for processing. Separated from celery.py to maintain clean separation
@@ -11,15 +10,14 @@ from typing import Any, Dict
 
 from app.choices import MessageRole
 from app.models import Bot, Message
-from utils.telegram import parse_telegram_update
 from managers import TelegramClientManager
+from utils.telegram import parse_telegram_update
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramUpdateHandler:
-    """
-    Service for handling incoming Telegram updates.
+    """Service for handling incoming Telegram updates.
 
     Processes Telegram webhook/polling updates by:
     1. Parsing the update JSON
@@ -42,8 +40,7 @@ class TelegramUpdateHandler:
 
     @staticmethod
     def handle_update(bot: Bot, update: Dict[str, Any]) -> None:
-        """
-        Handle a single incoming Telegram update.
+        """Handle a single incoming Telegram update.
 
         Parses the update, saves the message to database, sends a typing
         indicator to the user, and queues the message for processing
@@ -88,7 +85,6 @@ class TelegramUpdateHandler:
             ...         logger.exception(f"Error handling update: {e}")
             ...         break
         """
-
         # Import here to avoid circular dependencies (tasks.py imports this service)
         from app.tasks import generate_embedding
 
