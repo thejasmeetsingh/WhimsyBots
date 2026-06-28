@@ -196,12 +196,6 @@ Tests use the dedicated `whimsybots.settings.test` module — SQLite in-memory, 
 
 ---
 
-## 🤝 Contributing
-
-PRs welcome. Please read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for project conventions (type hints, docstring style, error handling, how to add models / tasks / MCP servers) before opening a pull request. CI runs the pytest suite on every push to `master` and every PR.
-
----
-
 ## 📄 License
 
 This project is licensed under the [MIT LICENSE](LICENSE)
