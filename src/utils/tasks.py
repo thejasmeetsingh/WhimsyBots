@@ -1,5 +1,4 @@
-"""
-Shared helpers for the Celery tasks in 'app.tasks'.
+"""Shared helpers for the Celery tasks in 'app.tasks'.
 
 This module hosts the small, task-layer-specific helpers that are
 extracted out of 'app.tasks' to keep the task definitions focused
@@ -77,8 +76,7 @@ TELEGRAM_ALLOWED_UPDATES: list[str] = ["message"]
 
 
 def get_ollama_cfg() -> Optional[Ollama]:
-    """
-    Return the active 'Ollama' configuration, or None.
+    """Return the active 'Ollama' configuration, or None.
 
     The configuration is cached inside 'OllamaConfigManager' to
     avoid hitting the database on every task invocation. When no
@@ -89,7 +87,6 @@ def get_ollama_cfg() -> Optional[Ollama]:
     Returns:
         The configured 'Ollama' instance, or None if missing.
     """
-
     ollama = OllamaConfigManager.get_ollama_config()
     if ollama is not None:
         return ollama
@@ -103,8 +100,7 @@ def _get_by_id_or_log(
     obj_id: str,
     obj_label: str,
 ) -> Optional[Any]:
-    """
-    Fetch a model instance by primary key, logging if it is missing.
+    """Fetch a model instance by primary key, logging if it is missing.
 
     Centralises the "look up an object, return None if not found, log
     otherwise" pattern repeated for 'Bot', 'CronJob' and
@@ -120,7 +116,6 @@ def _get_by_id_or_log(
     Returns:
         The fetched model instance, or None if it does not exist.
     """
-
     try:
         return model.objects.get(id=obj_id)
     except model.DoesNotExist:
@@ -129,8 +124,7 @@ def _get_by_id_or_log(
 
 
 def get_bot_obj(bot_id: str) -> Optional[Bot]:
-    """
-    Return the 'Bot' identified by 'bot_id', or None.
+    """Return the 'Bot' identified by 'bot_id', or None.
 
     Args:
         bot_id: UUID (as 'str') of the bot to fetch.
@@ -138,13 +132,11 @@ def get_bot_obj(bot_id: str) -> Optional[Bot]:
     Returns:
         The 'Bot' instance, or None if it does not exist.
     """
-
     return _get_by_id_or_log(Bot, bot_id, obj_label="bot")
 
 
 def get_cron_obj(cron_job_id: str) -> Optional[CronJob]:
-    """
-    Return the 'CronJob' identified by 'cron_job_id', or None.
+    """Return the 'CronJob' identified by 'cron_job_id', or None.
 
     Args:
         cron_job_id: UUID (as 'str') of the cron job to fetch.
@@ -152,13 +144,11 @@ def get_cron_obj(cron_job_id: str) -> Optional[CronJob]:
     Returns:
         The 'CronJob' instance, or None if it does not exist.
     """
-
     return _get_by_id_or_log(CronJob, cron_job_id, obj_label="cron job")
 
 
 def get_msg_obj(msg_id: str) -> Optional[Message]:
-    """
-    Return the 'Message' identified by 'msg_id', or None.
+    """Return the 'Message' identified by 'msg_id', or None.
 
     Args:
         msg_id: UUID (as 'str') of the message to fetch.
@@ -166,13 +156,11 @@ def get_msg_obj(msg_id: str) -> Optional[Message]:
     Returns:
         The 'Message' instance, or None if it does not exist.
     """
-
     return _get_by_id_or_log(Message, msg_id, obj_label="message")
 
 
 def create_log(bot: Bot, is_success: bool, desc: str) -> None:
-    """
-    Persist a 'Log' entry describing the outcome of a task step.
+    """Persist a 'Log' entry describing the outcome of a task step.
 
     Args:
         bot: Bot the log entry should be associated with.
@@ -180,7 +168,6 @@ def create_log(bot: Bot, is_success: bool, desc: str) -> None:
         desc: Human-readable description of what happened. Pre-formatted
             via the 'strings.*' templates by the caller.
     """
-
     Log.objects.create(bot=bot, is_success=is_success, description=desc)
 
 
@@ -190,8 +177,7 @@ def create_log(bot: Bot, is_success: bool, desc: str) -> None:
 
 
 def _should_skip_message_embedding(message: Message) -> bool:
-    """
-    Decide whether 'message' is eligible for embedding generation.
+    """Decide whether 'message' is eligible for embedding generation.
 
     A message is skipped if it is not a user message or already has a
     stored embedding vector. Both conditions are normal — the caller
@@ -203,7 +189,6 @@ def _should_skip_message_embedding(message: Message) -> bool:
     Returns:
         True if the message should be skipped, False otherwise.
     """
-
     if message.role != MessageRole.USER.value[0]:
         logger.debug("Skipping embedding for non-user message %s", message.id)
         return True
@@ -216,8 +201,7 @@ def _should_skip_message_embedding(message: Message) -> bool:
 
 
 def generate_message_embedding(ollama: Ollama, msg_id: str) -> Optional[Bot]:
-    """
-    Generate and persist the embedding for a single user message.
+    """Generate and persist the embedding for a single user message.
 
     The function is a no-op (returning None) for non-user messages
     or when the message already carries an embedding. On success, the
@@ -232,7 +216,6 @@ def generate_message_embedding(ollama: Ollama, msg_id: str) -> Optional[Bot]:
         The owning 'Bot' on success (handy for the caller when
         it needs to log a failure), otherwise None.
     """
-
     message = get_msg_obj(msg_id=msg_id)
     if message is None:
         return None
@@ -240,9 +223,7 @@ def generate_message_embedding(ollama: Ollama, msg_id: str) -> Optional[Bot]:
     if _should_skip_message_embedding(message):
         return None
 
-    EmbeddingService(bot=message.bot, ollama=ollama).save_message_embedding(
-        message=message
-    )
+    EmbeddingService(bot=message.bot, ollama=ollama).save_message_embedding(message=message)
 
     # Queue for processing on default worker — context assembly will
     # use the embedding we just persisted. Dispatched by name to avoid
@@ -260,8 +241,7 @@ def generate_message_embedding(ollama: Ollama, msg_id: str) -> Optional[Bot]:
 
 
 def generate_cron_job_embedding(ollama: Ollama, cron_job_id: str) -> Optional[Bot]:
-    """
-    Generate and persist the embedding for a cron job's schedule.
+    """Generate and persist the embedding for a cron job's schedule.
 
     Args:
         ollama: Active 'Ollama' configuration.
@@ -270,21 +250,17 @@ def generate_cron_job_embedding(ollama: Ollama, cron_job_id: str) -> Optional[Bo
     Returns:
         The owning 'Bot' on success, otherwise None.
     """
-
     cron_job = get_cron_obj(cron_job_id=cron_job_id)
     if cron_job is None:
         return None
 
-    EmbeddingService(bot=cron_job.bot, ollama=ollama).save_cron_job_embedding(
-        cron_job=cron_job
-    )
+    EmbeddingService(bot=cron_job.bot, ollama=ollama).save_cron_job_embedding(cron_job=cron_job)
 
     return cron_job.bot
 
 
 def generate_mcp_embedding(ollama: Ollama, mcp_server_id: str) -> Optional[Bot]:
-    """
-    Generate and persist the embedding for a single MCP server.
+    """Generate and persist the embedding for a single MCP server.
 
     Unlike the message / cron helpers this function does not log an
     error when the server is missing — MCP server entries are
@@ -298,15 +274,12 @@ def generate_mcp_embedding(ollama: Ollama, mcp_server_id: str) -> Optional[Bot]:
     Returns:
         The owning 'Bot' on success, otherwise None.
     """
-
     try:
         mcp_server = MCPServer.objects.get(id=mcp_server_id)
     except MCPServer.DoesNotExist:
         return None
 
-    EmbeddingService(bot=mcp_server.bot, ollama=ollama).save_mcp_embedding(
-        mcp_server=mcp_server
-    )
+    EmbeddingService(bot=mcp_server.bot, ollama=ollama).save_mcp_embedding(mcp_server=mcp_server)
 
     return mcp_server.bot
 
@@ -322,8 +295,7 @@ def build_error_description(
     bot: Optional[Bot],
     error: BaseException,
 ) -> tuple[str, int]:
-    """
-    Build the log description + retry delay for a failed task invocation.
+    """Build the log description + retry delay for a failed task invocation.
 
     Telegram rate-limit errors get a dedicated message and use the
     server-supplied 'retry_after' value. Every other exception falls
@@ -337,9 +309,9 @@ def build_error_description(
         error: The exception that was raised.
 
     Returns:
-        A 2-tuple '(description, retry_minutes)' ready to be passed to 'create_log' and 'self.retry'.
+        A 2-tuple '(description, retry_minutes)' ready to be passed to
+        'create_log' and 'self.retry'.
     """
-
     bot_name = bot.name if bot is not None else "unknown"
 
     if isinstance(error, TelegramRateLimitError):
@@ -360,8 +332,7 @@ def log_task_failure(
     description: str,
     log_message: str,
 ) -> None:
-    """
-    Persist an error log entry and emit the matching logger call.
+    """Persist an error log entry and emit the matching logger call.
 
     Args:
         bot: The bot being processed when the error occurred. May be
@@ -372,7 +343,6 @@ def log_task_failure(
         log_message: Short message forwarded to 'logger.error' (the
             full traceback is attached via 'exc_info=True' by callers).
     """
-
     if bot is not None:
         create_log(bot=bot, is_success=False, desc=description)
     logger.error(log_message, exc_info=True)

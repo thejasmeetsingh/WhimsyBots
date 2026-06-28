@@ -1,6 +1,4 @@
-"""
-Cross-domain formatting helpers.
-"""
+"""Cross-domain formatting helpers."""
 
 from __future__ import annotations
 
@@ -10,8 +8,7 @@ from typing import Any, Dict, List, Optional
 def convert_messages_to_ollama_format(
     messages, system_prompt: Optional[str] = None
 ) -> List[Dict[str, str]]:
-    """
-    Convert 'app.models.Message' rows to Ollama chat format.
+    """Convert 'app.models.Message' rows to Ollama chat format.
 
     WhimsyBots stores the conversation role as a single-letter code
     ('U' for user, 'A' for assistant) on the database side.
@@ -32,7 +29,6 @@ def convert_messages_to_ollama_format(
     Returns:
         A list of '{"role": ..., "content": ...}' dicts ready to be sent to Ollama.
     """
-
     role_mapping = {
         "U": "user",
         "A": "assistant",
@@ -53,8 +49,7 @@ def convert_messages_to_ollama_format(
 
 
 def get_admin_link(model: str, value: int, obj: Any) -> str:
-    """
-    Render an HTML anchor for filtered admin list views.
+    """Render an HTML anchor for filtered admin list views.
 
     Used in admin list displays to create quick-access links to the
     filtered related-object list (e.g. clicking a message count links
@@ -69,10 +64,6 @@ def get_admin_link(model: str, value: int, obj: Any) -> str:
         An HTML '<a>' tag, or the literal string '0' when
         'obj' is missing or 'value' is falsy.
     """
-
     if not obj or not value:
         return "0"
-    return (
-        f"<a href='/admin/app/{model}/?bot_id={str(obj.id)}' "
-        f"target='_blank'>{value}</a>"
-    )
+    return f"<a href='/admin/app/{model}/?bot_id={str(obj.id)}' target='_blank'>{value}</a>"

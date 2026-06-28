@@ -1,5 +1,4 @@
-"""
-Long-text chunking utilities.
+"""Long-text chunking utilities.
 
 Telegram caps a single message at 4096 characters. 'split_message'
 breaks a longer string into pieces while preserving the integrity of
@@ -16,8 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def split_message(text: str, limit: int = 4096) -> List[str]:
-    """
-    Split 'text' into chunks of at most 'limit' characters.
+    r"""Split 'text' into chunks of at most 'limit' characters.
 
     Attempts to split at the most natural boundary available, in this
     priority order:
@@ -41,7 +39,6 @@ def split_message(text: str, limit: int = 4096) -> List[str]:
     Returns:
         A list of text chunks, each no longer than 'limit' characters.
     """
-
     if len(text) <= limit:
         return [text]
 
@@ -95,8 +92,7 @@ def split_message(text: str, limit: int = 4096) -> List[str]:
 
 
 def _find_split_point(window: str) -> int:
-    """
-    Find the best character index to split at within 'window'.
+    """Find the best character index to split at within 'window'.
 
     Scans backwards from the end of 'window' to find the
     highest-priority natural boundary. Falls back to a hard cut at
@@ -109,7 +105,6 @@ def _find_split_point(window: str) -> int:
         Index at which to split — exclusive, so 'text[:split_at]'
         is the chunk and 'text[split_at:]' is the remainder.
     """
-
     # Priority 1: closing code fence on its own line
     idx = window.rfind("\n```")
     if idx != -1:
@@ -141,8 +136,7 @@ def _find_split_point(window: str) -> int:
 
 
 def _get_unclosed_fence(chunk: str, currently_open: Optional[str]) -> Optional[str]:
-    """
-    Determine whether 'chunk' ends inside a Markdown code block.
+    """Determine whether 'chunk' ends inside a Markdown code block.
 
     Args:
         chunk: The chunk text to scan.
@@ -152,7 +146,6 @@ def _get_unclosed_fence(chunk: str, currently_open: Optional[str]) -> Optional[s
         The opening fence line (e.g. ``"```python"``) if a block is
         still open at the end of the chunk, otherwise None.
     """
-
     open_fence = currently_open
 
     for line in chunk.splitlines():
@@ -169,8 +162,7 @@ def _get_unclosed_fence(chunk: str, currently_open: Optional[str]) -> Optional[s
 
 
 def _needs_fence_prefix(chunk_text: str, open_fence: str) -> bool:
-    """
-    Check whether 'chunk_text' already starts with the fence opener.
+    """Check whether 'chunk_text' already starts with the fence opener.
 
     Prevents double-prefixing when the split happened exactly at a
     fence boundary.
@@ -182,5 +174,4 @@ def _needs_fence_prefix(chunk_text: str, open_fence: str) -> bool:
     Returns:
         True if the prefix should be added.
     """
-
     return not chunk_text.lstrip().startswith(open_fence)

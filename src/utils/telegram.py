@@ -1,6 +1,4 @@
-"""
-Telegram payload parsing helpers.
-"""
+"""Telegram payload parsing helpers."""
 
 from __future__ import annotations
 
@@ -8,8 +6,7 @@ from typing import Any, Dict, Optional
 
 
 def parse_telegram_update(update: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Normalise a raw Telegram update payload into a flat dict.
+    """Normalise a raw Telegram update payload into a flat dict.
 
     Telegram's webhook JSON is deeply nested and varies in shape
     depending on the update type. This helper pulls out the fields
@@ -31,7 +28,6 @@ def parse_telegram_update(update: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         — 'first_name': Sender's first name (may be empty).
         — 'date': Message timestamp as returned by Telegram.
     """
-
     msg = update.get("message")
     if not msg:
         return None
