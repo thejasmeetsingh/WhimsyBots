@@ -10,7 +10,7 @@ on:
 
 jobs:
   test:
-    name: Run pytest
+    name: Test & Lint
     runs-on: ubuntu-latest
 
     steps:
@@ -55,8 +55,6 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      - name: Lint (non-blocking)
-        # Reports docstring + style violations but does not fail the build
-        # on the first rollout — gives the codebase time to converge on the
-        # style documented in docs/DOCSTRING_STYLE.md.
-        run: ruff check --config src/pyproject.toml src/ || true
+      - name: Lint
+        working-directory: src
+        run: ruff check src/ || true
