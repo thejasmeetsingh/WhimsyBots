@@ -1,4 +1,4 @@
-"""Entry point for the PDF generator MCP server"""
+"""Entry point for the PDF generator MCP server."""
 
 import asyncio
 import logging

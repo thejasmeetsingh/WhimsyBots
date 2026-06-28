@@ -1,16 +1,14 @@
-"""
-PDF Generator MCP Server Module
+"""PDF Generator MCP Server Module.
 
 Key Features:
-    - HTML to PDF conversion using weasyprint
-    - Secure token handling with decryption
-    - Direct Telegram document delivery
-    - Comprehensive error handling and logging
-    - UUID validation for bot identification
+    - HTML to PDF conversion using WeasyPrint.
+    - Secure token handling with decryption.
+    - Direct Telegram document delivery.
+    - Comprehensive error handling and logging.
+    - UUID validation for bot identification.
 
-Example Usage:
-    The server exposes the `generate_and_send_report` tool which can be invoked
-    to create and send a PDF report to a specific bot's associated Telegram user.
+The server exposes the 'generate_and_send_report' tool which can be invoked
+to create and send a PDF report to a specific bot's associated Telegram user.
 """
 
 import logging
@@ -91,9 +89,7 @@ async def generate_and_send_report(bot_id: str, contents: str) -> str:
         return contents
 
     pdf_bytes = generate_pdf(html_contents)
-    logger.info(
-        {"tool": "generate_and_send_report", "msg": "Report generated successfully"}
-    )
+    logger.info({"tool": "generate_and_send_report", "msg": "Report generated successfully"})
 
     try:
         async with get_session() as session:
@@ -108,9 +104,7 @@ async def generate_and_send_report(bot_id: str, contents: str) -> str:
             bot_data = row._asdict()
             token = decrypt_token(bot_data["telegram_bot_token"])
 
-            send_document(
-                chat_id=bot_data["telegram_chat_id"], token=token, file_bytes=pdf_bytes
-            )
+            send_document(chat_id=bot_data["telegram_chat_id"], token=token, file_bytes=pdf_bytes)
 
         return "PDF generated and sent to the user successfully ✅"
     except Exception as e:

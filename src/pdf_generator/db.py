@@ -1,4 +1,4 @@
-"""Database connection and session management for the PDF Generator MCP server"""
+"""Database connection and session management for the PDF Generator MCP server."""
 
 import os
 from contextlib import asynccontextmanager
@@ -9,8 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 def _build_db_url() -> str:
-    """
-    Construct the SQLAlchemy database URL from environment variables.
+    """Construct the SQLAlchemy database URL from environment variables.
 
     Args:
         None
@@ -21,7 +20,6 @@ def _build_db_url() -> str:
     Raises:
         EnvironmentError: If required DB credentials (NAME, USER, PASSWORD) are missing.
     """
-
     driver = os.getenv("DB_DRIVER", "postgresql+asyncpg")
     host = os.getenv("DB_HOST", "localhost")
     port = os.getenv("DB_PORT", "5432")
@@ -38,15 +36,12 @@ def _build_db_url() -> str:
 
 
 engine = create_async_engine(_build_db_url(), pool_pre_ping=True, echo=False)
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine, expire_on_commit=False, class_=AsyncSession
-)
+AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Asynchronous context manager for database sessions.
+    """Asynchronous context manager for database sessions.
 
     Provides a scoped session for database operations. Automatically
     handles session closure and rolls back transactions if a SQLAlchemyError
@@ -58,7 +53,6 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     Raises:
         SQLAlchemyError: Re-raises any database errors encountered during the session.
     """
-
     async with AsyncSessionLocal() as session:
         try:
             yield session

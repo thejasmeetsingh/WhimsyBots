@@ -1,4 +1,4 @@
-"""Helper utilities for PDF Generator"""
+"""Helper utilities for PDF Generator."""
 
 import base64
 import hashlib
@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_pdf(html_content: str) -> bytes:
-    """
-    Convert HTML content to PDF bytes using WeasyPrint.
+    """Convert HTML content to PDF bytes using WeasyPrint.
 
     Supports inline CSS styling for custom formatted reports.
     Converts to PDF in-memory and returns bytes for file operations.
@@ -39,7 +38,6 @@ def generate_pdf(html_content: str) -> bytes:
         >>> with open("report.pdf", "wb") as f:
         ...     f.write(pdf_bytes)
     """
-
     pdf_buffer = io.BytesIO()
 
     try:
@@ -53,18 +51,17 @@ def generate_pdf(html_content: str) -> bytes:
 
 
 def extract_html(text: str) -> Optional[str]:
-    """
-    Extracts HTML content from LLM output.
+    """Extract HTML content from LLM output.
+
     Handles cases:
     - HTML inside ```html ... ``` code blocks
     - HTML inside ``` ... ``` code blocks (no language tag)
     - Raw HTML with no code block
     - Mixed content with markdown + HTML
-    - Blank / no HTML content
+    - Blank / no HTML content.
 
     Returns the extracted HTML string, or None if no HTML found.
     """
-
     if not text or not text.strip():
         return None
 
@@ -100,8 +97,8 @@ def extract_html(text: str) -> Optional[str]:
 
 
 def send_document(chat_id: str, token: str, file_bytes: bytes) -> dict[str, Any]:
-    """
-    Send a document (file) to the chat.
+    """Send a document (file) to the chat.
+
     Sends binary file content as a Telegram document.
 
     Args:
@@ -123,7 +120,6 @@ def send_document(chat_id: str, token: str, file_bytes: bytes) -> dict[str, Any]
         ...     caption="📄 Your monthly report"
         ... )
     """
-
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     filename = f"report-{chat_id}-{datetime.now().isoformat()}.pdf"
     caption = "📄 Your report is ready!"
@@ -135,9 +131,7 @@ def send_document(chat_id: str, token: str, file_bytes: bytes) -> dict[str, Any]
     )
 
     if response.status_code != 200:
-        raise Exception(
-            f"Telegram 'sendDocument' API error: Status code - {response.status_code}"
-        )
+        raise Exception(f"Telegram 'sendDocument' API error: Status code - {response.status_code}")
 
     data = response.json()
     if not data.get("ok"):
@@ -147,8 +141,7 @@ def send_document(chat_id: str, token: str, file_bytes: bytes) -> dict[str, Any]
 
 
 def decrypt_token(ciphertext: str) -> str:
-    """Derive a valid Fernet key and decrypt the given ciphertext"""
-
+    """Derive a valid Fernet key and decrypt the given ciphertext."""
     secret_key: Optional[str] = os.getenv("SECRET_KEY")
     if not secret_key:
         raise EnvironmentError("SECRET_KEY is required for decrypting the token")
@@ -161,8 +154,7 @@ def decrypt_token(ciphertext: str) -> str:
 
 
 def parse_uuid(value: str, label: str) -> uuid.UUID | str:
-    """
-    Return a UUID object or an error string.
+    """Return a UUID object or an error string.
 
     Args:
         value (str): The string to parse as a UUID.
@@ -172,7 +164,6 @@ def parse_uuid(value: str, label: str) -> uuid.UUID | str:
         uuid.UUID: Parsed UUID if successful.
         str: Markdown error message if parsing fails.
     """
-
     try:
         return uuid.UUID(value)
     except ValueError:
