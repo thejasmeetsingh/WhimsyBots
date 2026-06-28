@@ -1,8 +1,9 @@
 # Architecture & Data Models v3.0
 
-> **Changelog**
-> - **v3.0 (Jun 28, 2026)** — Major update: full pytest suite, CI workflow, settings split (`base.py` / `test.py`), new `utils` subpackage, vector embeddings for messages / cron schedules / MCP servers, semantic MCP tool ranking, rewritten token budget with priority tiers + `recommended_tool_count`, inline skills into system prompt, `process_cron_job` now takes a `CronJob` instance, embedding dispatch centralized in `generate_embedding`.
-> - **v2.0** — Initial architecture document covering MCP servers, tool-calling loop, PDF generator MCP server, conversation summaries, cron jobs.
+> **Documentation Map**
+> - [README](../README.md) — Project overview, features, and quick start
+> - [DEVELOPMENT](DEVELOPMENT.md) — Contributor onboarding, project layout, coding conventions
+> - [TROUBLESHOOTING](TROUBLESHOOTING.md) — Common issues and resolutions
 
 ---
 
