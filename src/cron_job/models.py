@@ -1,4 +1,4 @@
-"""Database models for the Cron Job MCP server"""
+"""Database models for the Cron Job MCP server."""
 
 import uuid
 from datetime import datetime, timezone
@@ -15,8 +15,7 @@ class Base(DeclarativeBase):
 
 
 class CronJob(Base):
-    """
-    CronJob model for persisting scheduled bot runs.
+    """CronJob model for persisting scheduled bot runs.
 
     This model maps to the 'app_cronjob' table in the database.
     It stores the cron expression and calculates the next execution time.
@@ -25,9 +24,7 @@ class CronJob(Base):
     __tablename__ = "app_cronjob"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

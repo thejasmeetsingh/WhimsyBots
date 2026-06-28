@@ -16,7 +16,8 @@ The LLM can call these tools to help users manage their bot scheduling.
 Example MCP Usage:
     # User asks: "Set up a daily report at 9 AM"
     # LLM calls: await list_cron_jobs(bot_id="...")
-    # LLM calls: await create_cron_job(bot_id="...", name="Daily Report", cron_expression="0 9 * * *")
+    # LLM calls: await create_cron_job(bot_id="...", name="Daily Report",
+    #     cron_expression="0 9 * * *")
 """
 
 import logging
@@ -72,7 +73,7 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
 
             | id | bot_id | name | cron_expression | next_run_at | is_active |
             |---|---|---|---|---|---|
-            | xxx-xxx-xxx | xxx-xxx-xxx | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
+            | xxx-... | xxx-... | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
 
     Raises:
         ValueError: If bot_id is not a valid UUID
@@ -108,9 +109,7 @@ async def list_cron_jobs(bot_id: str, is_active: Optional[bool] = None) -> str:
 
 
 @mcp.tool()
-async def create_cron_job(
-    bot_id: str, name: str, description: str, cron_expression: str
-) -> str:
+async def create_cron_job(bot_id: str, name: str, description: str, cron_expression: str) -> str:
     """
     Create a new cron job for a bot.
 
@@ -137,7 +136,7 @@ async def create_cron_job(
 
             | id | bot_id | name | cron_expression | next_run_at | is_active |
             |---|---|---|---|---|---|
-            | xxx-xxx-xxx | xxx-xxx-xxx | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
+            | xxx-... | xxx-... | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
 
     Raises:
         ValueError: If cron_expression is invalid
@@ -222,7 +221,7 @@ async def update_cron_job(
 
             | id | bot_id | name | cron_expression | next_run_at | is_active |
             |---|---|---|---|---|---|
-            | xxx-xxx-xxx | xxx-xxx-xxx | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
+            | xxx-... | xxx-... | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
 
             Or error message if job not found or validation failed:
             ## Not Found
@@ -321,7 +320,7 @@ async def delete_cron_job(id: str, bot_id: str) -> str:
 
             | id | bot_id | name | cron_expression | next_run_at | is_active |
             |---|---|---|---|---|---|
-            | xxx-xxx-xxx | xxx-xxx-xxx | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
+            | xxx-... | xxx-... | Daily Report | 0 9 * * * | 2026-05-05 09:00:00+00:00 | True |
 
             Or error message if job not found:
             ## Not Found

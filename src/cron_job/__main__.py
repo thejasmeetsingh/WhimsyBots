@@ -1,4 +1,4 @@
-"""Entry point for the Cron Job MCP server"""
+"""Entry point for the Cron Job MCP server."""
 
 import asyncio
 import logging
