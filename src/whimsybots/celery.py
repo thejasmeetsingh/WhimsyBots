@@ -1,3 +1,10 @@
+"""Celery application bootstrap.
+
+Exposes the 'task' Celery instance configured from Django settings and
+autodiscovers tasks under the 'app' package. Import this module via
+'from whimsybots.celery import task' to register the decorator.
+"""
+
 import os
 
 from celery import Celery

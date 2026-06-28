@@ -1,3 +1,11 @@
+"""Base Django settings for the WhimsyBots project.
+
+The test settings module ('whimsybots.settings.test') imports from
+this file and overrides values needed for the in-memory SQLite-backed
+test environment. Production deployments also extend this file with
+real DB credentials, webhook URLs, and production-grade caching.
+"""
+
 import logging.config
 import os
 from pathlib import Path
@@ -157,7 +165,10 @@ logging.config.dictConfig(
         "formatters": {
             "default": {
                 "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
-                "format": "%(asctime)s - %(module)s.%(funcName)s - %(name)s - %(levelname)s - %(message)s - %(exc_text)s",
+                "format": (
+                    "%(asctime)s - %(module)s.%(funcName)s - %(name)s "
+                    "- %(levelname)s - %(message)s - %(exc_text)s"
+                ),
             },
             "django.server": DEFAULT_LOGGING["formatters"]["django.server"],
         },

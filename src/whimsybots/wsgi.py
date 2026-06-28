@@ -1,3 +1,8 @@
+"""WSGI entry point for production servers (Gunicorn / uWSGI).
+
+Exposes the standard 'application' callable used by WSGI servers.
+"""
+
 import os
 
 from django.core.wsgi import get_wsgi_application

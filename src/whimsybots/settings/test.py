@@ -31,8 +31,8 @@ from django.db.models import JSONField  # noqa: E402
 
 
 class _ArrayField(JSONField):
-    """
-    Drop-in SQLite shim for django.contrib.postgres.fields.ArrayField.
+    """Drop-in SQLite shim for django.contrib.postgres.fields.ArrayField.
+
     Stores the array as a JSON array; supports most query patterns used in tests.
     """
 
@@ -60,8 +60,8 @@ from unittest.mock import MagicMock  # noqa: E402
 
 
 class _VectorField(JSONField):
-    """
-    Drop-in SQLite shim for pgvector.django.VectorField.
+    """Drop-in SQLite shim for pgvector.django.VectorField.
+
     Stores the vector as a JSON array of floats.
     """
 

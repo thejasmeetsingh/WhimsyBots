@@ -1,5 +1,4 @@
-"""
-Telegram webhook views for handling incoming messages.
+"""Telegram webhook views for handling incoming messages.
 
 This module provides Django class-based views to receive Telegram webhook
 updates and queue them for async processing via Celery tasks.
@@ -17,8 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramWebhook(View):
-    """
-    Django view for handling Telegram webhook updates.
+    """Django view for handling Telegram webhook updates.
 
     Receives POST requests from Telegram API when users send messages to bots.
     Validates the request, extracts the bot token from URL, and queues the
@@ -26,8 +24,7 @@ class TelegramWebhook(View):
     """
 
     def post(self, request, *args, **kwargs):
-        """
-        Handle incoming Telegram webhook POST request.
+        """Handle incoming Telegram webhook POST request.
 
         Validates the request payload and bot token, then queues the update
         for async processing. Returns immediately to acknowledge receipt to
@@ -54,7 +51,6 @@ class TelegramWebhook(View):
                 }
             }
         """
-
         if not kwargs.get("token"):
             return HttpResponseBadRequest(content="No bot token provided")
 
