@@ -1,18 +1,16 @@
-<div align="center">
+<img width="2720" height="1200" alt="whimsybots_logo" src="https://github.com/user-attachments/assets/ac9cc953-91d8-4fde-b3c1-64d0e4f08abf" />
 
-# WhimsyBots
+---
 
 **A self-hosted, Django-based AI agent platform where you create and configure AI-powered "apps" through an admin panel.**
 
 Each app talks to users over Telegram, reasons through a local Ollama LLM, calls external tools via the Model Context Protocol (MCP), runs on a cron schedule, and can generate rich PDF reports on demand.
 
-</div>
-
 <div align="center">
 
-[![Tests](https://img.shields.io/badge/CI-pytest-blue?logo=githubactions&logoColor=white)](.github/workflows/master.yml)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Django 5.2](https://img.shields.io/badge/Django-5.2-092E20?logo=django&logoColor=white)](https://www.djangoproject.com/)
+[![Tests](https://img.shields.io/badge/CI-pytest-blue?logo=githubactions&logoColor=white)](.github/workflows/master.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Ollama](https://img.shields.io/badge/LLM-Ollama-000?logo=ollama)](https://ollama.com)
 [![MCP](https://img.shields.io/badge/Tools-MCP-8A2BE2)](https://modelcontextprotocol.io)
