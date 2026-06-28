@@ -1,9 +1,34 @@
 # Troubleshooting Guide
 
+> **Documentation Map**
+> - [README](../README.md) — Project overview, features, and quick start
+> - [ARCHITECTURE](ARCHITECTURE.md) — Technical deep dive, data models, request flows
+> - [DEVELOPMENT](DEVELOPMENT.md) — Contributor onboarding, project layout, coding conventions
+
 This guide provides common issues, symptoms, and resolutions for components in the WhimsyBots system.
 
 ## Overview
 Most issues are related to connectivity between the application container and external services (Ollama, Telegram, Redis/Celery). Ensure your environment variables in `.env` or `docker-compose.yml` match the network topology of your deployment.
+
+### First-step Health Checks
+Before diving into the table below, run these quick commands:
+
+```bash
+# Are all containers running?
+make ps
+
+# Are the database and Redis healthy?
+docker compose -f src/docker-compose.yml ps
+
+# Are the Celery workers and beat connected?
+# Open the Flower dashboard at http://localhost:5555
+
+# Is Ollama reachable from the app container?
+docker compose -f src/docker-compose.yml exec app curl -s http://host.docker.internal:11434/api/tags
+
+# Are recent tasks succeeding or failing?
+docker compose -f src/docker-compose.yml logs --tail=200 celery_worker | grep -i 'error\|retry'
+```
 
 ---
 
@@ -13,7 +38,7 @@ The system interacts with an Ollama instance for local LLM processing.
 | Symptom | Possible Cause | Resolution |
 | :--- | :--- | :--- |
 | `ollama.ResponseError` or Connection Refused | Incorrect endpoint URL; Docker network mismatch. | If running in Docker, ensure the URL is set to `http://host.docker.internal:11434`. Outside of Docker, use `http://localhost:11434`. |
-| "Model not found" or missing capabilities | Ollama service is running but doesn't have the specific model pulled. | Run `ollama pull <model_name>` (e.g., `llm pull llama3`) on your host machine to ensure the local instance has the required weights. |
+| "Model not found" or missing capabilities | Ollama service is running but doesn't have the specific model pulled. | Run `ollama pull <model_name>` (e.g., `ollama pull llama3`) on your host machine to ensure the local instance has the required weights. Embedding models (e.g. `nomic-embed-text`) must also be pulled explicitly. |
 | Slow responses / Timeout | Model too large for hardware or `num_ctx` set too high. | Check system resources and try a smaller model (e.g., `phi3`, `mistral`) or reduce `num_ctx` in the configuration. |
 
 ## 2. Telegram Integration Issues
@@ -46,3 +71,26 @@ If you are running locally without a complex setup, ensure these defaults are me
 - **Ollama URL:** `http://localhost:11434` (or `host.docker.internal` if in Docker)
 - **Telegram Token:** Valid token from @BotFather.
 - **Redis:** Running on standard ports (`6379`, `5672`).
+
+---
+
+## 5. Tests & Local Development
+
+| Symptom | Possible Cause | Resolution |
+| :--- | :--- | :--- |
+| `ImportError: No module named 'pgvector.django'` when running `pytest` | The test settings module has not been loaded yet — `pgvector` is shimmed inside `whimsybots/settings/test.py`. | Ensure `pytest.ini` declares `DJANGO_SETTINGS_MODULE = whimsybots.settings.test` and you're running from the `src/` directory. |
+| `django.contrib.postgres.fields.ArrayField` errors on SQLite | Tests run against SQLite (see `whimsybots/settings/test.py`). | The shim in `test.py` patches `ArrayField` to a `JSONField` subclass. Don't bypass the test settings module. |
+| `pgvector` errors after changing `Bot.embedding_dimensions` | Existing rows still hold vectors of the old size; pgvector enforces a strict dimension match. | Re-embed all messages (and any cron / MCP embeddings) after changing dimensions. The admin shows a warning next to the field — do not ship without re-embedding. |
+| `Fernet: InvalidToken` after rotating `SECRET_KEY` | The Fernet key is derived from `SECRET_KEY` via SHA-256; rotating it invalidates every encrypted column. | Never rotate `SECRET_KEY` without first decrypting and re-encrypting existing rows. For development, drop and recreate the DB instead. |
+| `IntegrityError` on `telegram_bot_token_hash` | Two bots ended up with the same hash (hash collision is astronomically unlikely — almost always a duplicate token). | The admin enforces uniqueness. If you see this in tests, make sure you're not reusing the same token across two test bots. |
+| Celery task runs but bot never responds in Telegram | The webhook is not reachable from the public internet, or `WEBHOOK_BASE_URL` is misconfigured. | Telegram requires an **HTTPS** endpoint reachable by their servers. Set `WEBHOOK_BASE_URL` to a public URL pointing at `/webhook/<bot_token>/` (use a tunnel like `ngrok` or a reverse proxy for local testing). |
+
+---
+
+## 6. Getting More Help
+
+- **Architecture details** — see [ARCHITECTURE.md](ARCHITECTURE.md) for the full request flow, data model, and Celery task reference.
+- **Contributor setup** — see [DEVELOPMENT.md](DEVELOPMENT.md) for environment setup, project layout, and testing conventions.
+- **Logs and debugging** — `make logs-app`, `make logs-worker`, `make logs-scheduler`, and the Flower UI at `http://localhost:5555`.
+- **Django shell** — `make shell` for ad-hoc ORM queries against a live container.
+- **Redis CLI** — `make redis-shell` to inspect rate-limit keys (`tg_rate:*`) and Celery queues directly.
