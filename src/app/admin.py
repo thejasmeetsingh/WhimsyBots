@@ -1,6 +1,13 @@
+"""Django admin configuration for WhimsyBots models.
+
+Registers all application models with custom admin classes that filter
+records by the requesting user, render bot-specific statistics, and
+enqueue Celery tasks on save when relevant configuration changes occur.
+"""
+
 from django.contrib import admin
+from django.db.models import Count, OuterRef, Q, Subquery
 from django.utils.html import format_html
-from django.db.models import Count, Q, Subquery, OuterRef
 
 from app.choices import MessageRole
 from app.forms import BotForm, MCPServerForm
@@ -14,9 +21,10 @@ admin.AdminSite.site_title = "WhimsyBots"
 
 # Base Admin Classes
 class BaseUserFilteredAdmin(admin.ModelAdmin):
-    """
-    Base admin class for models filtered by the current user.
-    Automatically filters related objects to show only those owned by the requesting user.
+    """Base admin class for models filtered by the current user.
+
+    Automatically filters related objects to show only those owned by the
+    requesting user.
     """
 
     list_per_page = 20
@@ -24,42 +32,42 @@ class BaseUserFilteredAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         """Filter queryset to show only objects created by the current user."""
-
         qs = super().get_queryset(request)
-        return qs.filter(bot__created_by_id=request.user.id).select_related(
-            "bot__created_by"
-        )
+        return qs.filter(bot__created_by_id=request.user.id).select_related("bot__created_by")
 
 
 class BaseReadOnlyUserFilteredAdmin(BaseUserFilteredAdmin):
-    """
-    Base admin class for read-only models filtered by the current user.
+    """Base admin class for read-only models filtered by the current user.
+
     Inherits user filtering and adds read-only permissions.
     """
 
     def has_add_permission(self, request):
+        """Never allow adding new records via admin."""
         return False
 
     def has_change_permission(self, request, obj=None):
+        """Never allow editing existing records via admin."""
         return False
 
     def has_delete_permission(self, request, obj=None):
+        """Never allow deleting records via admin."""
         return False
 
 
 @admin.register(Ollama)
 class OllamaAdmin(admin.ModelAdmin):
-    """
-    Admin interface for Ollama configuration.
+    """Admin interface for Ollama configuration.
+
     Limited to a single instance to prevent configuration conflicts.
     """
 
     def has_add_permission(self, request):
         """Allow adding only if no Ollama instance exists."""
-
         return Ollama.objects.count() == 0
 
     def save_model(self, request, obj, form, change):
+        """Persist the Ollama config and trigger summary regeneration on num_ctx change."""
         if change and "num_ctx" in form.changed_data:
             # Trigger summary regeneration for all active bots.
             # No bot_id = task fetches all active bots internally.
@@ -70,10 +78,10 @@ class OllamaAdmin(admin.ModelAdmin):
 
 @admin.register(Bot)
 class BotAdmin(admin.ModelAdmin):
-    """
-    Admin interface for Bot management.
-    Displays bot statistics, execution status, scheduling, and communication settings.
-    Each user only sees bots they created.
+    """Admin interface for Bot management.
+
+    Displays bot statistics, execution status, scheduling, and communication
+    settings. Each user only sees bots they created.
     """
 
     form = BotForm
@@ -125,7 +133,6 @@ class BotAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         """Optimize queryset with select_related and prefetch_related for performance."""
-
         return (
             super()
             .get_queryset(request)
@@ -135,28 +142,16 @@ class BotAdmin(admin.ModelAdmin):
             .annotate(
                 # Stats
                 messages_count=Count("messages"),
-                mcp_active_count=Count(
-                    "mcp_servers", filter=Q(mcp_servers__is_active=True)
-                ),
-                mcp_inactive_count=Count(
-                    "mcp_servers", filter=Q(mcp_servers__is_active=False)
-                ),
-                cron_active_count=Count(
-                    "bot_cron_jobs", filter=Q(bot_cron_jobs__is_active=True)
-                ),
+                mcp_active_count=Count("mcp_servers", filter=Q(mcp_servers__is_active=True)),
+                mcp_inactive_count=Count("mcp_servers", filter=Q(mcp_servers__is_active=False)),
+                cron_active_count=Count("bot_cron_jobs", filter=Q(bot_cron_jobs__is_active=True)),
                 cron_inactive_count=Count(
                     "bot_cron_jobs", filter=Q(bot_cron_jobs__is_active=False)
                 ),
-                logs_success_count=Count(
-                    "bot_logs", filter=Q(bot_logs__is_success=True)
-                ),
-                logs_error_count=Count(
-                    "bot_logs", filter=Q(bot_logs__is_success=False)
-                ),
+                logs_success_count=Count("bot_logs", filter=Q(bot_logs__is_success=True)),
+                logs_error_count=Count("bot_logs", filter=Q(bot_logs__is_success=False)),
                 # Latest log data
-                last_log_id=Subquery(
-                    Log.objects.filter(bot=OuterRef("id")).values("id")[:1]
-                ),
+                last_log_id=Subquery(Log.objects.filter(bot=OuterRef("id")).values("id")[:1]),
                 last_log_success=Subquery(
                     Log.objects.filter(bot=OuterRef("id")).values("is_success")[:1]
                 ),
@@ -164,8 +159,7 @@ class BotAdmin(admin.ModelAdmin):
         )
 
     def _render_stats_table(self, obj):
-        """
-        Render the statistics table HTML for a bot.
+        """Render the statistics table HTML for a bot.
 
         Args:
             obj: Bot instance
@@ -173,7 +167,6 @@ class BotAdmin(admin.ModelAdmin):
         Returns:
             HTML-formatted statistics table showing messages, MCP servers, and logs.
         """
-
         if not obj:
             return "-"
 
@@ -193,7 +186,8 @@ class BotAdmin(admin.ModelAdmin):
         errors = getattr(obj, "logs_error_count", 0)
 
         return f"""
-            <table cellpadding="10" cellspacing="10" style="text-align: center; border: 2px solid #ccc;">
+            <table cellpadding="10" cellspacing="10"
+                   style="text-align: center; border: 2px solid #ccc;">
                 <thead>
                     <tr>
                         <th>Messages</th>
@@ -228,20 +222,16 @@ class BotAdmin(admin.ModelAdmin):
     @admin.display(description="Stats")
     def get_stats(self, obj=None):
         """Display formatted stats table for the bot."""
-
         return format_html(self._render_stats_table(obj))
 
     @admin.display(description="Last Execution Status")
     def last_execution_status(self, obj=None):
         """Display the last execution status with appropriate icon and link."""
-
         if not obj or not hasattr(obj, "last_log_id") or not obj.last_log_id:
             return "-"
 
         if obj.last_log_success:
-            return format_html(
-                "<img src='/static/admin/img/icon-yes.svg' alt='Success'>"
-            )
+            return format_html("<img src='/static/admin/img/icon-yes.svg' alt='Success'>")
 
         return format_html(
             f"<a href='/admin/app/log/{obj.last_log_id}' target='_blank'>"
@@ -249,11 +239,14 @@ class BotAdmin(admin.ModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
-        """
-        Set the current user as the bot creator, calculate next run time,
-        and set up Telegram webhook when bot is created or token is changed.
-        """
+        """Persist the bot and enqueue webhook setup when relevant.
 
+        Sets the current user as the bot creator, calculates the next
+        run time, and sets up the Telegram webhook when a new bot is
+        created or an existing bot's token changes.
+        """
+        # Associate current user with bot object
+        obj.created_by = request.user
         # Associate current user with bot object
         obj.created_by = request.user
 
@@ -282,8 +275,8 @@ class BotAdmin(admin.ModelAdmin):
 
 @admin.register(MCPServer)
 class MCPServerAdmin(BaseUserFilteredAdmin):
-    """
-    Admin interface for MCP Server configuration.
+    """Admin interface for MCP Server configuration.
+
     Allows creation and management of Model Context Protocol servers per bot.
     """
 
@@ -309,8 +302,8 @@ class MCPServerAdmin(BaseUserFilteredAdmin):
 
 @admin.register(Message)
 class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
-    """
-    Admin interface for viewing bot messages.
+    """Admin interface for viewing bot messages.
+
     Messages are read-only and cannot be created, modified, or deleted via admin.
     """
 
@@ -327,8 +320,7 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
 
     @admin.display(description="Sender")
     def get_sender(self, obj=None):
-        """Display message sender name"""
-
+        """Display message sender name."""
         if not obj:
             return "-"
 
@@ -339,8 +331,8 @@ class MessageAdmin(BaseReadOnlyUserFilteredAdmin):
 
 @admin.register(CronJob)
 class CronJobAdmin(BaseReadOnlyUserFilteredAdmin):
-    """
-    Admin interface for viewing cron job schedules.
+    """Admin interface for viewing cron job schedules.
+
     Cron jobs are read-only and cannot be created, modified, or deleted via admin.
     Displays scheduling information including cron expressions and execution timestamps.
     """
@@ -369,16 +361,18 @@ class CronJobAdmin(BaseReadOnlyUserFilteredAdmin):
     )
 
     def has_change_permission(self, request, obj=None):
+        """Allow changing records (overrides the read-only base class)."""
         return True
 
     def has_delete_permission(self, request, obj=None):
+        """Allow deleting records (overrides the read-only base class)."""
         return True
 
 
 @admin.register(Log)
 class LogAdmin(BaseReadOnlyUserFilteredAdmin):
-    """
-    Admin interface for viewing bot execution logs.
+    """Admin interface for viewing bot execution logs.
+
     Logs are read-only and cannot be created, modified, or deleted via admin.
     """
 

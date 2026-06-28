@@ -1,5 +1,4 @@
-"""
-Database models for WhimsyBots application.
+"""Database models for WhimsyBots application.
 
 This module defines the core data models:
 - Ollama: Language model configuration and settings
@@ -22,12 +21,12 @@ from pgvector.django import VectorField
 
 from app.choices import MCPTransportType, MessageRole
 from app.fields import EncryptedCharField, EncryptedJSONField
-from utils.crypto import get_token_hash
 from app.validators import (
     validate_cron_expression,
     validate_keep_alive,
     validate_transport_fields,
 )
+from utils.crypto import get_token_hash
 
 
 class BaseModel(models.Model):
@@ -44,8 +43,7 @@ class BaseModel(models.Model):
 
 
 class Ollama(BaseModel):
-    """
-    Configuration for the Ollama language model service.
+    """Configuration for the Ollama language model service.
 
     Stores connection details and model parameters for the Ollama instance.
     Only one instance should exist in the system (enforced via admin).
@@ -93,8 +91,7 @@ class Ollama(BaseModel):
 
 
 class Bot(BaseModel):
-    """
-    Bot configuration and state.
+    """Bot configuration and state.
 
     Represents a single bot instance with its own scheduling, system prompt,
     and Telegram communication settings.
@@ -114,11 +111,17 @@ class Bot(BaseModel):
     )
     embedding_model = models.CharField(
         max_length=50,
-        help_text="Model used for vector embeddings. Run: 'ollama pull nomic-embed-text' if no embedding model installed",
+        help_text=(
+            "Model used for vector embeddings. "
+            "Run: 'ollama pull nomic-embed-text' if no embedding model installed"
+        ),
     )
     embedding_dimensions = models.PositiveIntegerField(
         default=768,
-        help_text="Must match your chosen embedding model. Changing this requires re-embedding all messages.",
+        help_text=(
+            "Must match your chosen embedding model. "
+            "Changing this requires re-embedding all messages."
+        ),
     )
     system_prompt = MartorField(
         null=True,
@@ -134,12 +137,8 @@ class Bot(BaseModel):
     )
 
     # Telegram Communication
-    telegram_bot_token = EncryptedCharField(
-        help_text="Telegram bot API token from BotFather"
-    )
-    telegram_bot_token_hash = models.CharField(
-        max_length=64, unique=True, editable=False
-    )
+    telegram_bot_token = EncryptedCharField(help_text="Telegram bot API token from BotFather")
+    telegram_bot_token_hash = models.CharField(max_length=64, unique=True, editable=False)
     telegram_chat_id = models.CharField(
         max_length=255,
         null=True,
@@ -152,6 +151,11 @@ class Bot(BaseModel):
         verbose_name_plural = "Bots"
 
     def save(self, *args, **kwargs):
+        """Persist the bot, populating the deterministic token hash first.
+
+        The hash is required so webhook handlers can look up the bot by
+        token without ever decrypting the stored ciphertext.
+        """
         if self.telegram_bot_token:
             # Save encrypted telegram_bot_token hash
             # Deterministic — same input always gives same hash
@@ -163,8 +167,7 @@ class Bot(BaseModel):
 
 
 class MCPServer(BaseModel):
-    """
-    Model Context Protocol (MCP) server configuration.
+    """Model Context Protocol (MCP) server configuration.
 
     Represents an MCP server that can be used to provide tools/resources
     to a bot. Supports both local (command-based) and remote (HTTP) servers.
@@ -194,7 +197,10 @@ class MCPServer(BaseModel):
         default=list,
         null=True,
         blank=True,
-        help_text="Command arguments as comma-seperated list (e.g., -y, @modelcontextprotocol/server-memory)",
+        help_text=(
+            "Command arguments as comma-seperated list "
+            "(e.g., -y, @modelcontextprotocol/server-memory)"
+        ),
     )
     secrets = EncryptedJSONField(
         null=True,
@@ -213,19 +219,16 @@ class MCPServer(BaseModel):
 
     def clean(self):
         """Validate transport-specific fields."""
-
         validate_transport_fields(self.transport, self.command, self.endpoint)
         return super().clean()
 
     @staticmethod
     def get_default_mcp_servers() -> dict[str, "MCPServer"]:
-        """
-        Create MCPServer (temp) objects for default MCP servers
+        """Create MCPServer (temp) objects for default MCP servers.
 
         Returns:
             dict[str, MCPServer]: MCPServer objects
         """
-
         cron_job_mcp = MCPServer(
             name="cron_job",
             transport=MCPTransportType.LOCAL.value[0],
@@ -271,8 +274,7 @@ class MCPServer(BaseModel):
 
 
 class Message(BaseModel):
-    """
-    Conversation message in bot interaction history.
+    """Conversation message in bot interaction history.
 
     Stores individual messages from users and bot responses for
     conversation history, report classification, and report generation.
@@ -293,8 +295,7 @@ class Message(BaseModel):
 
 
 class CronJob(BaseModel):
-    """
-    Scheduled job definition for bot execution.
+    """Scheduled job definition for bot execution.
 
     Represents a cron-based schedule for automated bot runs. Each job belongs
     to a single bot and defines when that bot should execute using standard
@@ -311,9 +312,7 @@ class CronJob(BaseModel):
         help_text="Scheduling in standard cron format",
         validators=[validate_cron_expression],
     )
-    next_run_at = models.DateTimeField(
-        help_text="Calculated timestamp for next execution"
-    )
+    next_run_at = models.DateTimeField(help_text="Calculated timestamp for next execution")
     last_run_at = models.DateTimeField(
         null=True, blank=True, help_text="Timestamp of last execution"
     )
@@ -326,17 +325,14 @@ class CronJob(BaseModel):
 
 
 class Log(BaseModel):
-    """
-    Execution log for bot runs.
+    """Execution log for bot runs.
 
     Records the success/failure status and details of each bot execution
     for monitoring, debugging, and audit purposes.
     """
 
     bot = models.ForeignKey(Bot, on_delete=models.CASCADE, related_name="bot_logs")
-    is_success = models.BooleanField(
-        default=True, help_text="Whether the bot execution succeeded"
-    )
+    is_success = models.BooleanField(default=True, help_text="Whether the bot execution succeeded")
     description = models.TextField(
         null=True, blank=True, help_text="Error message or execution details"
     )

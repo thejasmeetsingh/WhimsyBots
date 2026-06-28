@@ -1,3 +1,11 @@
+"""Custom Django model fields backed by Fernet encryption.
+
+Two field types are provided: 'EncryptedCharField' for single-string
+columns (Telegram bot tokens) and 'EncryptedJSONField' for structured
+data (MCP server secrets). Both transparently encrypt on write and
+decrypt on read via the project's Fernet key derived from 'SECRET_KEY'.
+"""
+
 import json
 
 from django import forms
@@ -11,7 +19,6 @@ class EncryptedCharField(models.TextField):
 
     def from_db_value(self, value, expression, connection):
         """Called when data is loaded FROM the database."""
-
         if value is None:
             return value
         try:
@@ -21,7 +28,6 @@ class EncryptedCharField(models.TextField):
 
     def to_python(self, value):
         """Called during form validation / deserialization."""
-
         if value is None:
             return value
         try:
@@ -31,7 +37,6 @@ class EncryptedCharField(models.TextField):
 
     def get_prep_value(self, value):
         """Called when writing TO the database."""
-
         if value is None:
             return value
         try:
@@ -42,6 +47,7 @@ class EncryptedCharField(models.TextField):
             return encrypt(value)  # plaintext coming in → encrypt it
 
     def formfield(self, **kwargs):
+        """Build the form field used for admin / ModelForm rendering."""
         kwargs.update(
             {"widget": forms.TextInput}
         )  # Use the conventional widget similar to CharField
@@ -53,7 +59,6 @@ class EncryptedJSONField(models.TextField):
 
     def from_db_value(self, value, expression, connection):
         """Called when data is loaded FROM the database."""
-
         if value is None:
             return value
         try:
@@ -63,7 +68,6 @@ class EncryptedJSONField(models.TextField):
 
     def to_python(self, value):
         """Called during form validation / deserialization."""
-
         if value is None:
             return value
         if isinstance(value, (dict, list)):
@@ -78,7 +82,6 @@ class EncryptedJSONField(models.TextField):
 
     def get_prep_value(self, value):
         """Called when writing TO the database."""
-
         if value is None:
             return value
         if isinstance(value, (dict, list)):

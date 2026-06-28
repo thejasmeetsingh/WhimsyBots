@@ -1,5 +1,4 @@
-"""
-Custom Django validators for WhimsyBots models.
+"""Custom Django validators for WhimsyBots models.
 
 This module provides field-level validation functions for:
 - Cron expression syntax validation
@@ -16,8 +15,7 @@ from app.choices import MCPTransportType
 
 
 def validate_cron_expression(value: str) -> None:
-    """
-    Validate that a string is a valid cron expression.
+    """Validate that a string is a valid cron expression.
 
     Ensures the cron expression follows standard cron syntax and can be
     parsed by croniter without errors.
@@ -38,7 +36,6 @@ def validate_cron_expression(value: str) -> None:
         This validator is called at the model level when saving a Bot.
         The field is required if cron scheduling is chosen over intervals.
     """
-
     if not value:
         raise ValidationError("Cron expression should not be empty.")
 
@@ -50,8 +47,7 @@ def validate_cron_expression(value: str) -> None:
 
 
 def validate_transport_fields(transport_type: str, cmd: str, endpoint: str) -> None:
-    """
-    Validate that MCP server transport configuration is complete.
+    """Validate that MCP server transport configuration is complete.
 
     Ensures that required fields are provided based on the transport type:
     - LOCAL transport must have a command
@@ -78,7 +74,6 @@ def validate_transport_fields(transport_type: str, cmd: str, endpoint: str) -> N
         This validator is called in the MCPServer model's clean() method before saving.
         The transport type is a required choice field with predefined values.
     """
-
     if transport_type == MCPTransportType.LOCAL.value[0] and not cmd:
         raise ValidationError(
             "Command must be provided for LOCAL transport type. "
@@ -93,8 +88,7 @@ def validate_transport_fields(transport_type: str, cmd: str, endpoint: str) -> N
 
 
 def validate_keep_alive(value: str):
-    """
-    Validate Ollama keep_alive duration string.
+    """Validate Ollama keep_alive duration string.
 
     Accepts:
         -1          → never unload model from memory
@@ -106,7 +100,6 @@ def validate_keep_alive(value: str):
     Raises:
         ValidationError: If value doesn't match any accepted format
     """
-
     pattern = r"^(-1|0|\d+[smh])$"
     if not re.match(pattern, value.strip()):
         raise ValidationError(
