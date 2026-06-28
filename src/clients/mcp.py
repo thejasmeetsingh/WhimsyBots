@@ -1,5 +1,4 @@
-"""
-Model Context Protocol (MCP) client.
+"""Model Context Protocol (MCP) client.
 
 Provides async/await interface for connecting to MCP servers (both local and remote).
 Handles tool discovery and execution with automatic cleanup.
@@ -17,8 +16,7 @@ from app.choices import MCPTransportType
 
 
 class MCPClient:
-    """
-    Asynchronous client for Model Context Protocol.
+    """Asynchronous client for Model Context Protocol.
 
     Connects to MCP servers (local or remote) to discover available tools
     and execute them. Supports both stdio-based local servers and
@@ -59,8 +57,7 @@ class MCPClient:
     """
 
     def __init__(self, transport_type: str, config: dict[str, Any]) -> None:
-        """
-        Initialize MCP client.
+        """Initialize MCP client.
 
         Args:
             transport_type (str): Connection type
@@ -79,15 +76,13 @@ class MCPClient:
                         'headers': {'Authorization': 'Bearer token'}  # optional
                     }
         """
-
         self.transport_type = transport_type
         self.config = config
         self.exit_stack = AsyncExitStack()
         self._session: Optional[ClientSession] = None
 
     async def _connect(self) -> ClientSession:
-        """
-        Establish connection to MCP server.
+        """Establish connection to MCP server.
 
         Creates either a stdio-based or HTTP-based connection based on transport_type.
         Caches the session for reuse on subsequent calls.
@@ -100,7 +95,6 @@ class MCPClient:
 
         Internal method - not meant to be called directly.
         """
-
         # Return cached session if available
         if self._session is not None:
             return self._session
@@ -108,9 +102,7 @@ class MCPClient:
         if self.transport_type == MCPTransportType.LOCAL.value[0]:
             # LOCAL: Spawn subprocess with stdio
             params = StdioServerParameters(**self.config)
-            (read, write) = await self.exit_stack.enter_async_context(
-                stdio_client(params)
-            )
+            (read, write) = await self.exit_stack.enter_async_context(stdio_client(params))
         else:
             # REMOTE: HTTP connection
             http_client = httpx.AsyncClient(headers=self.config.get("headers", {}))
@@ -126,8 +118,7 @@ class MCPClient:
         return self._session
 
     async def list_tools(self) -> list[dict[str, Any]]:
-        """
-        list all available tools from the MCP server.
+        """List all available tools from the MCP server.
 
         Queries the connected MCP server for available tools and converts
         them to Ollama-compatible function format for use in chat completions.
@@ -159,7 +150,6 @@ class MCPClient:
             >>> for tool in tools:
             ...     print(f"{tool['function']['name']}: {tool['function']['description']}")
         """
-
         session = await self._connect()
         response = await session.list_tools()
 
@@ -188,8 +178,7 @@ class MCPClient:
     async def execute_tool(
         self, name: str, arguments: Optional[dict[str, Any]] = None
     ) -> dict[str, Any]:
-        """
-        Execute a tool on the MCP server.
+        """Execute a tool on the MCP server.
 
         Calls a tool by name with optional arguments and returns the result.
 
@@ -221,15 +210,13 @@ class MCPClient:
         Example - Tool without arguments:
             >>> result = await client.execute_tool('get_current_time')
         """
-
         session = await self._connect()
         response = await session.call_tool(name, arguments)
 
         return response.model_dump()
 
     async def cleanup(self) -> None:
-        """
-        Close server connection and release resources.
+        """Close server connection and release resources.
 
         Must be called when done with the client to properly close
         the subprocess or HTTP connection and clean up resources.
@@ -244,7 +231,6 @@ class MCPClient:
             ... finally:
             ...     await client.cleanup()
         """
-
         await self.exit_stack.aclose()
         self._session = None
 
@@ -254,8 +240,7 @@ async def mcp_client(
     config: dict[str, Any],
     payload: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any] | list[dict[str, Any]]:
-    """
-    Convenience async function for single MCP server operations.
+    """Convenience async function for single MCP server operations.
 
     Creates an MCPClient, performs an operation, and cleans up.
     Useful for one-off tool calls without managing client lifecycle.
@@ -289,7 +274,6 @@ async def mcp_client(
         This is a convenience wrapper. For multiple operations, create
         an MCPClient instance directly and manage its lifecycle.
     """
-
     client = MCPClient(transport_type, config)
 
     try:

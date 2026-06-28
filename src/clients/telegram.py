@@ -1,5 +1,4 @@
-"""
-Telegram bot client.
+"""Telegram bot client.
 
 Provides a high-level interface for Telegram Bot API interactions.
 Handles message sending, file uploads, user actions, and webhook updates.
@@ -13,15 +12,14 @@ import redis
 import requests
 from django.conf import settings
 
-from utils.text import split_message
 from services.rate_limiter import RateLimiter
+from utils.text import split_message
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramError(Exception):
-    """
-    Custom exception for Telegram API errors.
+    """Custom exception for Telegram API errors.
 
     Raised when:
     - HTTP request fails
@@ -33,8 +31,7 @@ class TelegramError(Exception):
 
 
 class TelegramRateLimitError(TelegramError):
-    """
-    Raised when Telegram returns a 429 Too Many Requests response.
+    """Raised when Telegram returns a 429 Too Many Requests response.
 
     Attributes:
         retry_after (int): Seconds to wait before retrying, as specified
@@ -42,13 +39,18 @@ class TelegramRateLimitError(TelegramError):
     """
 
     def __init__(self, retry_after: int):
+        """Store the Telegram-supplied retry interval and format the message.
+
+        Args:
+            retry_after: Seconds to wait before retrying, as specified
+                by Telegram in the response body.
+        """
         self.retry_after = retry_after
         super().__init__(f"Telegram rate limit hit. Retry after {retry_after}s")
 
 
 class TelegramClient:
-    """
-    Client for interacting with Telegram Bot API.
+    """Client for interacting with Telegram Bot API.
 
     Provides methods to send messages, documents, and user actions to a Telegram chat.
     Automatically handles message splitting for long texts (Telegram limit: 4096 chars).
@@ -69,8 +71,7 @@ class TelegramClient:
     _RATE_LIMIT_WAIT = 1  # seconds to wait between retries when throttled locally
 
     def __init__(self, token: str, chat_id: Optional[str] = None):
-        """
-        Initialize Telegram client.
+        """Initialize Telegram client.
 
         Args:
             token (str): Telegram bot API token (from BotFather)
@@ -84,7 +85,6 @@ class TelegramClient:
             ...     chat_id="987654321"
             ... )
         """
-
         self.chat_id = chat_id
         self.base_url = f"https://api.telegram.org/bot{token}"
 
@@ -95,8 +95,7 @@ class TelegramClient:
         self._rate_limiter = RateLimiter(self._redis, token)
 
     def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """
-        Make authenticated POST request to Telegram API.
+        """Make authenticated POST request to Telegram API.
 
         Handles HTTP request, response validation, and error handling.
 
@@ -113,7 +112,6 @@ class TelegramClient:
 
         Internal method - not meant to be called directly.
         """
-
         url = f"{self.base_url}/{endpoint}"
         response = requests.post(url=url, json=payload)
 
@@ -135,13 +133,11 @@ class TelegramClient:
         return data["result"]
 
     def _acquire_rate_limit(self):
-        """
-        Block until a send slot is available within the local rate limiter.
+        """Block until a send slot is available within the local rate limiter.
 
         Retries up to _RATE_LIMIT_RETRIES times, sleeping _RATE_LIMIT_WAIT
         seconds between attempts. Logs a warning if throttled.
         """
-
         for attempt in range(self._RATE_LIMIT_RETRIES):
             if self._rate_limiter.acquire():
                 return
@@ -156,8 +152,7 @@ class TelegramClient:
         logger.warning("Rate limiter exhausted retries — proceeding anyway")
 
     def send_message(self, text: str, parse_mode: str = "Markdown") -> dict[str, Any]:
-        """
-        Send a text message to the chat.
+        """Send a text message to the chat.
 
         Automatically splits long messages into multiple messages if text exceeds
         4096 characters (Telegram limit), sending each chunk separately.
@@ -194,7 +189,6 @@ class TelegramClient:
             >>> very_long_text = "x" * 10000
             >>> client.send_message(very_long_text)  # Sends 3 messages
         """
-
         result = {}
         chunks = split_message(text)
 
@@ -214,8 +208,7 @@ class TelegramClient:
             except TelegramError as e:
                 if "can't parse entities" in str(e).lower():
                     logger.warning(
-                        "Markdown parse failed, retrying as plain text. "
-                        "Offset error: %s",
+                        "Markdown parse failed, retrying as plain text. Offset error: %s",
                         e,
                     )
 
@@ -230,8 +223,7 @@ class TelegramClient:
         return result
 
     def send_typing_action(self) -> dict[str, Any]:
-        """
-        Show 'typing...' indicator in chat.
+        """Show 'typing...' indicator in chat.
 
         Sends a typing action that displays "Bot is typing..." to the user.
         Useful for indicating processing before sending a response.
@@ -247,16 +239,10 @@ class TelegramClient:
             >>> # ... do some processing ...
             >>> client.send_message("Here's your response!")
         """
+        return self._post("sendChatAction", {"chat_id": self.chat_id, "action": "typing"})
 
-        return self._post(
-            "sendChatAction", {"chat_id": self.chat_id, "action": "typing"}
-        )
-
-    def set_webhook(
-        self, url: str, allowed_updates: Optional[List[str]] = None
-    ) -> dict[str, Any]:
-        """
-        Set a webhook for the bot to receive updates.
+    def set_webhook(self, url: str, allowed_updates: Optional[List[str]] = None) -> dict[str, Any]:
+        """Set a webhook for the bot to receive updates.
 
         Registers a webhook URL with Telegram, so updates are sent via POST requests
         to your server instead of polling.
@@ -291,7 +277,6 @@ class TelegramClient:
             - Telegram will verify SSL certificate
             - Use delete_webhook() to remove webhook and switch back to polling
         """
-
         payload: dict[str, str | list[str]] = {"url": url}
 
         if allowed_updates is not None:

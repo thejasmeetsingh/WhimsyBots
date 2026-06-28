@@ -1,5 +1,4 @@
-"""
-Ollama language model client.
+"""Ollama language model client.
 
 Provides a high-level interface for interacting with Ollama, a local language model service.
 Handles model listing, chat completions, and tool calling functionality.
@@ -11,8 +10,7 @@ import ollama
 
 
 class OllamaClient:
-    """
-    Client for interacting with Ollama language model service.
+    """Client for interacting with Ollama language model service.
 
     Wraps the official ollama Python package to provide:
     - Model listing and enumeration
@@ -38,8 +36,7 @@ class OllamaClient:
     """
 
     def __init__(self, endpoint: str, api_key: Optional[str] = None):
-        """
-        Initialize Ollama client.
+        """Initialize Ollama client.
 
         Args:
             endpoint (str | None): Ollama service URL
@@ -58,15 +55,13 @@ class OllamaClient:
             ...     api_key="secret-key-123"
             ... )
         """
-
         _endpoint = self._get_clean_endpoint(endpoint or "http://localhost:11434")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
         self._client = ollama.Client(host=_endpoint, headers=headers)
 
     @staticmethod
     def _get_clean_endpoint(endpoint: str) -> str:
-        """
-        Clean and normalize the Ollama endpoint URL.
+        """Clean and normalize the Ollama endpoint URL.
 
         Handles Docker-specific conversions:
         - Removes trailing slashes for consistency
@@ -85,13 +80,11 @@ class OllamaClient:
             >>> OllamaClient._get_clean_endpoint("https://api.example.com/")
             "https://api.example.com"
         """
-
         endpoint = endpoint.strip("/").replace("localhost", "host.docker.internal")
         return endpoint
 
     def list_models(self) -> list[str]:
-        """
-        List all available models on the Ollama instance.
+        """List all available models on the Ollama instance.
 
         Returns:
             list[str]: List of model names available
@@ -105,7 +98,6 @@ class OllamaClient:
             >>> print(models)
             ['llama2', 'mistral', 'neural-chat', 'dolphin-mixtral']
         """
-
         response = self._client.list()
         models: list[str] = []
 
@@ -123,8 +115,7 @@ class OllamaClient:
         tools: Optional[list[dict[str, Any]]] = None,
         options: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """
-        Send a chat message to Ollama and get a response.
+        """Send a chat message to Ollama and get a response.
 
         Supports multi-turn conversations with optional tool calling and structured output.
 
@@ -176,7 +167,6 @@ class OllamaClient:
             >>> if response["tools"]:
             ...     print(f"Called tool: {response['tools'][0]['name']}")
         """
-
         if keep_alive:
             keep_alive = keep_alive.strip()
             keep_alive = int(keep_alive) if keep_alive in {"-1", "0"} else keep_alive
@@ -213,11 +203,11 @@ class OllamaClient:
         truncate: Optional[bool] = None,
         dimensions: Optional[int] = None,
     ) -> list[float]:
-        """
-        Generate embeddings for a given text using Ollama.
+        """Generate embeddings for a given text using Ollama.
 
         Args:
-            model (str): Model name to use for embeddings (e.g., 'nomic-embed-text', 'mxbai-embed-large')
+            model (str): Model name to use for embeddings
+                (e.g., 'nomic-embed-text', 'mxbai-embed-large')
             text (str): Text to generate embeddings for
             truncate (bool): truncate inputs that exceed the context window
             dimensions (int | None): Number of dimensions to generate embeddings for
@@ -237,7 +227,6 @@ class OllamaClient:
             >>> print(len(response.embeddings))  # 768 (for nomic-embed-text)
             >>> print(response.embeddings[:5])   # First 5 embedding values
         """
-
         response = self._client.embed(
             model=model,
             input=text,
@@ -254,8 +243,7 @@ class OllamaClient:
         return embeddings
 
     def fetch_model_capabilities(self, model: str) -> list[str]:
-        """
-        Fetch capabilities of a given model.
+        """Fetch capabilities of a given model.
 
         Args:
             model (str): Model name to fetch details for (e.g., 'llama2', 'mistral')
@@ -272,7 +260,6 @@ class OllamaClient:
             >>> print(capabilities)
             ["completion", "vision"]
         """
-
         response = self._client.show(model=model)
 
         # Convert response to dictionary
