@@ -1,4 +1,4 @@
-.PHONY: help build up down logs shell migrate createsuperuser collectstatic lint format test clean restart stop start ps
+.PHONY: help build up down logs shell migrate createsuperuser collectstatic lint format test test-verbose test-coverage test-specific clean restart stop start ps
 
 help:
 	@echo "WhimsyBots - Available Commands"
@@ -34,7 +34,10 @@ help:
 	@echo "  make db-restore FILE=   - Restore database from dump"
 	@echo ""
 	@echo "Development Commands:"
-	@echo "  make test               - Run tests"
+	@echo "  make test               - Run the full test suite (pytest)"
+	@echo "  make test-verbose       - Run tests with verbose output"
+	@echo "  make test-coverage      - Run tests with coverage report"
+	@echo "  make test-specific FILE=<path>::<Test>::<test> - Run a specific test"
 	@echo "  make clean              - Remove docker volumes and containers"
 	@echo ""
 	@echo "Service Commands:"
@@ -121,8 +124,22 @@ endif
 	@echo "Database restored"
 
 # Development Commands
+# Tests use pytest (see src/pytest.ini) against the SQLite-backed test
+# settings module (whimsybots.settings.test) which already provides fakeredis
+# and shims for pgvector / ArrayField. We always run from src/ so pytest
+# discovers the `tests/` tree and the test settings module on sys.path.
 test:
-	cd src && docker-compose exec app python manage.py test
+	pytest src/tests/
+
+test-verbose:
+	pytest src/tests/ -v
+
+test-specific:
+ifndef FILE
+	@echo "Usage: make test-specific FILE=test_app/test_models.py::TestClass::test_method"
+	@exit 1
+endif
+	pytest src/tests/$(FILE)
 
 # Service Commands
 app-shell:
