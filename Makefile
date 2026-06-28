@@ -179,8 +179,8 @@ build-test: build test
 # Lint — runs ruff with the project config (see pyproject.toml).
 # First rollout is non-blocking: reports violations but does not fail the build.
 lint:
-	ruff check src/ || true
+	ruff check --config src/pyproject.toml src/ || true
 
 # Docstring-only lint (pydocstyle / Google convention).
 lint-docs:
-	ruff check --select D src/ || true
+	ruff check --config src/pyproject.toml --select D src/ || true

@@ -1,0 +1,55 @@
+[project]
+name = "whimsybots"
+version = "0.0.0"
+description = "WhimsyBots — Telegram bots powered by local LLMs"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    "src/static",
+    ".venv",
+    "venv",
+]
+
+[tool.ruff.lint]
+# Start with correctness + a focused docstring subset. Extend over time.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "D",   # pydocstyle (Google convention; see below)
+]
+ignore = [
+    "D203", # one-blank-line-before-class (conflicts with D211)
+    "D213", # multi-line-summary-second-line (conflicts with D212)
+    "D417", # undocumented-param — too noisy for instance methods where
+            # 'self' is always implicit. Google-style omits 'self'.
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# prompts.py is an LLM prompt body in Markdown — leave it alone.
+"src/prompts.py" = ["D", "E501"]
+# Tests keep one-line docstrings only; full Google sections are not required.
+"src/tests/**" = ["D", "E501"]
+# MCP-server scripts are small and self-documenting.
+"src/cron_job/server.py" = ["D"]
+"src/pdf_generator/server.py" = ["D"]
+# Package __init__.py files don't need a docstring on every project.
+"src/**/__init__.py" = ["D104"]
+# Django migrations are auto-generated and self-documenting.
+"src/app/migrations/*.py" = ["D", "E501"]
+# Magic methods (__str__, __repr__, __eq__) don't need docstrings.
+# Django Meta inner classes are also conventionally undocumented.
+"src/**/models.py" = ["D105", "D106"]
+# Django Form.Meta and ModelForm.Meta inner classes are conventionally
+# undocumented — they're declarative config, not classes with behavior.
+"src/**/forms.py" = ["D106"]
+# Celery tasks always receive 'self' as their first arg; D417's implicit-self
+# detection isn't supported in this ruff version.
+"src/app/tasks.py" = ["D417"]

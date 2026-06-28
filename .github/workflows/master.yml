@@ -59,4 +59,4 @@ jobs:
         # Reports docstring + style violations but does not fail the build
         # on the first rollout — gives the codebase time to converge on the
         # style documented in docs/DOCSTRING_STYLE.md.
-        run: ruff check src/ || true
+        run: ruff check --config src/pyproject.toml src/ || true
