@@ -121,7 +121,7 @@ After `make createsuperuser`, log into `http://localhost:8000/admin/` and comple
    ollama pull nomic-embed-text # or your preferred embedding model
    ```
 2. **Add an `Ollama` configuration** (`/admin/app/ollama/add/`):
-   - Endpoint: `https://ollama.com` (With Ollama Cloud API Key) or `http://localhost:11434` (when running in Docker)
+   - Endpoint: `http://localhost:11434` (when running in Docker)
    - `num_ctx`: 4096 minimum; raise if your hardware allows.
 3. **Create a `Bot`** (`/admin/app/bot/add/`):
    - Pick the LLM model and embedding model you just pulled.
