@@ -165,7 +165,7 @@ class OllamaClient:
             ...     ]
             ... )
             >>> if response["tools"]:
-            ...     print(f"Called tool: {response['tools'][0]['name']}")
+            ...     print(f"Called tool: {response['tools'][0]['function']['name']}")
         """
         if keep_alive:
             keep_alive = keep_alive.strip()
@@ -182,15 +182,9 @@ class OllamaClient:
         total_duration_ns = response.total_duration
         ollama_ms = round(total_duration_ns / 1_000_000) if total_duration_ns else None
 
-        tools = None
-
-        # Extract tool calls if any were made
-        if message.tool_calls:
-            tools = list(map(lambda x: x["function"], message.tool_calls))
-
         result: dict[str, Any] = {
             "message": message.content.strip(),
-            "tools": tools,
+            "tools": message.tool_calls,
             "ollama_ms": ollama_ms,
         }
 

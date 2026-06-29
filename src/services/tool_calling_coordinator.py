@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Optional
 
+from app.choices import MessageRole
 from app.models import Ollama
 from clients import OllamaClient
 from services.tool_executor import MCPToolConfig, ToolExecutor
@@ -37,6 +38,7 @@ def run_tool_calling_loop(
     """
     try:
         tool_executor = ToolExecutor(tools_config)
+        tools = [tool.tool for tool in tools_config]
 
         # Tool calling loop
         while True:
@@ -44,7 +46,7 @@ def run_tool_calling_loop(
                 model=model,
                 messages=history,
                 keep_alive=ollama.keep_alive if add_keep_alive else None,
-                tools=[tool.tool for tool in tools_config],
+                tools=tools,
                 options={
                     "temperature": ollama.temperature,
                     "num_ctx": ollama.num_ctx,
@@ -56,17 +58,26 @@ def run_tool_calling_loop(
             if not response.get("tools"):
                 break
 
+            # Append the assistant's tool-call message BEFORE the tool results
+            history.append(
+                {
+                    "role": MessageRole.ASSISTANT.value[1].lower(),
+                    "content": response.get("message", ""),
+                    "tool_calls": response.get("tools"),
+                }
+            )
+
             # Execute each tool call
             for tool_call in response.get("tools", []):
-                tool_call_dict = tool_call.model_dump()
+                tool_call_dict = tool_call["function"].model_dump()
                 result = tool_executor.execute_tool_call_sync(tool_call_dict)
 
                 if result is not None:
                     history.append(
                         {
-                            "role": "tool",
+                            "role": MessageRole.ASSISTANT.value[1].lower(),
                             "content": result,
-                            "tool_calls": [{"function": tool_call_dict}],
+                            "tool_calls": [tool_call],
                         }
                     )
 
