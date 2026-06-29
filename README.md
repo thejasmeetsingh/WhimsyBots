@@ -160,7 +160,6 @@ WhimsyBots/
 │   ├── utils/                    # Cross-cutting helpers (crypto, formatting, scheduling, …)
 │   ├── tests/                    # Pytest suite (test_app/, test_services/, test_utils/, …)
 │   ├── whimsybots/               # Django project (settings/, urls.py, views.py, celery.py, wsgi.py)
-│   ├── user/                     # Django migrations for the user app
 │   ├── manage.py
 │   ├── docker-compose.yml
 │   ├── Dockerfile
