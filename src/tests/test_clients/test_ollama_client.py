@@ -190,6 +190,10 @@ def test_chat_handles_missing_total_duration(client):
 
 
 def test_chat_extracts_tool_calls_from_response(client):
+    """The client must return tool_calls as-is from the SDK message object
+    (each entry keeps its `function` wrapper). Callers index `tc["function"]`
+    before reading tool name / arguments.
+    """
     tool_calls = [{"function": {"name": "get_weather", "arguments": {"city": "NYC"}}}]
     client._client.chat.return_value = _chat_response(
         content="checking weather",
@@ -199,7 +203,48 @@ def test_chat_extracts_tool_calls_from_response(client):
         model="llama3",
         messages=[{"role": "user", "content": "weather?"}],
     )
-    assert result["tools"] == [{"name": "get_weather", "arguments": {"city": "NYC"}}]
+    # Returned shape preserved — the `function` wrapper is NOT stripped.
+    assert result["tools"] == [{"function": {"name": "get_weather", "arguments": {"city": "NYC"}}}]
+    assert result["tools"][0]["function"]["name"] == "get_weather"
+
+
+def test_chat_returns_empty_tool_calls_list(client):
+    """An empty `tool_calls` list from the SDK must propagate verbatim
+    (None falsy vs [] truthy matters to the coordinator — see
+    `if not response.get("tools")`).
+    """
+    client._client.chat.return_value = _chat_response(
+        content="hi",
+        tool_calls=[],
+    )
+    result = client.chat(
+        model="llama3",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    assert result["tools"] == []
+    # Coordinator treats falsy `tools` as "no further action"; [] qualifies.
+    assert not result["tools"]
+
+
+def test_chat_preserves_multiple_tool_calls_in_order(client):
+    tool_calls = [
+        {"function": {"name": "first", "arguments": {}}},
+        {"function": {"name": "second", "arguments": {}}},
+        {"function": {"name": "third", "arguments": {}}},
+    ]
+    client._client.chat.return_value = _chat_response(
+        content="multiple",
+        tool_calls=tool_calls,
+    )
+    result = client.chat(
+        model="llama3",
+        messages=[{"role": "user", "content": "go"}],
+    )
+    assert [tc["function"]["name"] for tc in result["tools"]] == [
+        "first",
+        "second",
+        "third",
+    ]
 
 
 def test_chat_forwards_keep_alive_tools_options_to_sdk(client):
