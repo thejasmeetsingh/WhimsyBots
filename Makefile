@@ -36,7 +36,6 @@ help:
 	@echo "Development Commands:"
 	@echo "  make test               - Run the full test suite (pytest)"
 	@echo "  make test-verbose       - Run tests with verbose output"
-	@echo "  make test-coverage      - Run tests with coverage report"
 	@echo "  make test-specific FILE=<path>::<Test>::<test> - Run a specific test"
 	@echo "  make clean              - Remove docker volumes and containers"
 	@echo ""
