@@ -1,4 +1,4 @@
-<img width="2720" height="1200" alt="whimsybots_logo" src="https://github.com/user-attachments/assets/ac9cc953-91d8-4fde-b3c1-64d0e4f08abf" />
+<img width="5322" height="1877" alt="whimsybots-logo_out" src="https://github.com/user-attachments/assets/4d3b27a0-c317-44a0-b1a5-9b8abd2621bd" />
 
 ---
 
