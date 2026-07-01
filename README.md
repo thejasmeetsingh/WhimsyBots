@@ -2,9 +2,7 @@
 
 ---
 
-**A self-hosted, Django-based AI agent platform where you create and configure AI-powered "apps" through an admin panel.**
-
-Each app talks to users over Telegram, reasons through a local Ollama LLM, calls external tools via the Model Context Protocol (MCP), runs on a cron schedule, and can generate rich PDF reports on demand.
+**Each app talks to users over Telegram, reasons through a local Ollama LLM, calls external tools via the Model Context Protocol (MCP), runs on a cron schedule, and can generate rich PDF reports on demand.**
 
 <div align="center">
 
