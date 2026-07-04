@@ -15,14 +15,15 @@ DEFAULT_SYSTEM_PROMPT = """
 
 **User's Current DateTime:** {current_dt}
 
-## Overview of previous discussions between you (the assistant) and the user:
-"{summary}"
-
 # Skills
 
 - **Scheduling (Cron Jobs):** You can create, list, update, and delete the user's scheduled tasks.
 - **Report (PDF) Generator:** You can create a report in PDF format and send it to the user directly using the `generate_and_send_report` tool.
 - **Web Search:** You can search on web to get the relevant data for answering user's query. You have two tools to do that — `web_search` and `fetch_and_extract`.
+
+## Overview of previous discussions between you (the assistant) and the user:
+
+"{summary}"
 """
 
 
