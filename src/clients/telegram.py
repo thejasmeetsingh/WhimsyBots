@@ -11,6 +11,7 @@ from typing import Any, List, Optional
 import redis
 import requests
 from django.conf import settings
+from django.utils import timezone
 
 from services.rate_limiter import RateLimiter
 from utils.text import split_message
@@ -283,3 +284,46 @@ class TelegramClient:
             payload["allowed_updates"] = allowed_updates
 
         return self._post("setWebhook", payload)
+
+    def send_document(self, file_bytes: bytes) -> dict[str, Any]:
+        """Send a document (file) to the chat.
+
+        Sends binary file content as a Telegram document.
+
+        Args:
+            file_bytes (bytes): File content as bytes
+
+        Returns:
+            dict: API response with sent document details
+                - message_id: Unique message identifier
+                - document: Document information (file_id, file_size, etc.)
+                - caption: Caption text sent
+
+        Example - Send PDF report:
+            >>> pdf_bytes = generate_pdf(html_content)
+            >>> client.send_document(
+            ...     file_bytes=pdf_bytes,
+            ...     filename="report-2024-04.pdf",
+            ...     caption="📄 Your monthly report"
+            ... )
+        """
+        url = f"{self.base_url}/sendDocument"
+        filename = f"report-{self.chat_id}-{timezone.now().isoformat()}.pdf"
+        caption = "📄 Your report is ready!"
+
+        response = requests.post(
+            url,
+            data={"chat_id": self.chat_id, "caption": caption},
+            files={"document": (filename, file_bytes, "application/octet-stream")},
+        )
+
+        if response.status_code != 200:
+            raise Exception(
+                f"Telegram 'sendDocument' API error: Status code - {response.status_code}"
+            )
+
+        data = response.json()
+        if not data.get("ok"):
+            raise Exception(f"Failed to send document: {data}")
+
+        return data["result"]
