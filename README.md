@@ -1,10 +1,8 @@
-<img width="2720" height="1200" alt="whimsybots_logo" src="https://github.com/user-attachments/assets/ac9cc953-91d8-4fde-b3c1-64d0e4f08abf" />
+<img width="3548" height="1203" alt="whimsybots-logo_out" src="https://github.com/user-attachments/assets/130e244d-7e36-4024-a254-0f5ddfecb614" />
 
 ---
 
-**A self-hosted, Django-based AI agent platform where you create and configure AI-powered "apps" through an admin panel.**
-
-Each app talks to users over Telegram, reasons through a local Ollama LLM, calls external tools via the Model Context Protocol (MCP), runs on a cron schedule, and can generate rich PDF reports on demand.
+**Each app talks to users over Telegram, reasons through a local Ollama LLM, calls external tools via the Model Context Protocol (MCP), runs on a cron schedule, and can generate rich PDF reports on demand.**
 
 <div align="center">
 
