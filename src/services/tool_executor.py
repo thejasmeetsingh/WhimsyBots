@@ -207,7 +207,7 @@ class ToolExecutor:
         tool_name: str = tool_call.get("name", "")
         tool_args: dict[str, Any] = tool_call.get("arguments", {})
 
-        logger.info("Calling %s default tool...", tool_name)
+        logger.info("Calling '%s' default tool...", tool_name)
 
         if tool_name not in {WEB_SEARCH, FETCH_AND_EXTRACT}:
             if tool_name == GENERATE_PDF:
@@ -219,4 +219,8 @@ class ToolExecutor:
         if not _callable:
             return INVALID_TOOL.format(tool=tool_name)
 
-        return _callable(**tool_args)
+        try:
+            return _callable(**tool_args)
+        except Exception as e:
+            logger.error("Failed to execute tool call", exc_info=True)
+            return TOOL_EXECUTION_FAILED + f": {str(e)}"
