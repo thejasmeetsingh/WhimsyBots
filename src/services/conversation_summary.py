@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 from app.choices import MessageRole
-from app.models import Bot, MCPServer, Message, Ollama
+from app.models import Bot, Message, Ollama
 from clients.ollama import OllamaClient
 from prompts import SUMMARY_PROMPT
 from services.token_budget import TokenBudgetService
@@ -51,11 +51,6 @@ class ConversationSummaryService:
     def _set_summary_budget(self):
         # Build tools from servers
         mcp_servers = getattr(self.bot, "mcp_servers_list", [])
-
-        # Add default mcp server's to the 'mcp_servers' list
-        default_servers = MCPServer.get_default_mcp_servers()
-        mcp_servers.extend(list(default_servers.values()))
-
         tools_config = asyncio.run(MCPToolsBuilder.build_tools_from_servers(mcp_servers))
 
         # Derive the history token budget the same way ContextAssembler does,
