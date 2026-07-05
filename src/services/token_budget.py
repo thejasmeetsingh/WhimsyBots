@@ -5,7 +5,6 @@ Priority (most protected → truncated first):
   2. System prompt  — truncate from bottom if tight (includes skills block inline)
   3. History        — drop oldest messages first
   4. Embeddings     — drop lowest-similarity results first
-  5. Tool responses — truncated most aggressively (verbose, LLM-generated)
 
 All values are in CHARS. We never have an exact tokenizer for arbitrary
 Ollama models, so we use a conservative 3.5 chars/token estimate.
@@ -52,18 +51,22 @@ TOOL_DEF_AVG_TOKENS: int = 150
 # fixed reservations are carved out. Must sum to 1.0.
 #
 # Priority tiers:
-#   Tier 1 (equal) — history + embeddings: the model's primary context
-#   Tier 2         — tool_responses: the model's only window into live data
-#   Tier 3         — system_prompt + patterns + summary: important but bounded by design
-# Skills are now inlined into the system prompt, so the 5% previously carved
+#   Tier 1 — history + embeddings: the model's primary context
+#   Tier 2 — system_prompt + patterns + summary: important but bounded by design
+#
+# Tool responses are not budgeted here: there is no downstream consumer
+# that reads `tool_response_chars`, so reserving 25% of the budget was
+# dead weight. If/when tool-response truncation is wired in, reintroduce
+# a tier and rebalance.
+#
+# Skills are inlined into the system prompt, so the 5% previously carved
 # out for SKILLS_RESERVED_TOKENS is folded back into system_prompt.
 ALLOCATION_RATIOS: dict[str, float] = {
-    "history": 0.30,  # 30% — recency context, Tier 1
-    "embeddings": 0.25,  # 25% — semantic memory, Tier 1 (equal to history)
-    "tool_responses": 0.25,  # 25% — live data from MCP tools, Tier 2
-    "system_prompt": 0.10,  # 10% — user-authored prompt + inline skills, Tier 3
-    "patterns": 0.05,  # 5%  — behavioral profile, Tier 3
-    "summary": 0.05,  # 5%  — past conversation summary, Tier 3
+    "history": 0.40,  # 40% — recency context, Tier 1
+    "embeddings": 0.30,  # 30% — semantic memory, Tier 1
+    "system_prompt": 0.15,  # 15% — user-authored prompt + inline skills, Tier 2
+    "patterns": 0.10,  # 10% — behavioral profile, Tier 2
+    "summary": 0.05,  # 5%  — past conversation summary, Tier 2
 }
 
 assert abs(sum(ALLOCATION_RATIOS.values()) - 1.0) < 1e-9, "Ratios must sum to 1.0"
@@ -83,12 +86,10 @@ class TokenBudget(BaseModel):
     recommended_tool_count: int  # max tools we can fit given num_ctx + allocations
 
     # Allocations — ordered by priority tier
-    # Tier 1: primary context (equal weight)
+    # Tier 1: primary context
     history_tokens: int  # kept as tokens for message-count estimation
     embedding_chars: int
-    # Tier 2: live data from tools
-    tool_response_chars: int
-    # Tier 3: bounded by design, rarely need their full slice
+    # Tier 2: bounded by design, rarely need their full slice
     system_prompt_chars: int
     patterns_chars: int
     summary_chars: int
@@ -108,7 +109,6 @@ class TokenBudget(BaseModel):
                 "summary_chars": self.summary_chars,
                 "embedding_chars": self.embedding_chars,
                 "history_tokens": self.history_tokens,
-                "tool_response_chars": self.tool_response_chars,
                 "recommended_tool_count": self.recommended_tool_count,
             }
         )
@@ -195,7 +195,6 @@ class TokenBudgetService:
             recommended_tool_count=recommended_tool_count,
             history_tokens=allocations["history"],
             embedding_chars=cls._tokens_to_chars(allocations["embeddings"]),
-            tool_response_chars=cls._tokens_to_chars(allocations["tool_responses"]),
             system_prompt_chars=cls._tokens_to_chars(allocations["system_prompt"]),
             patterns_chars=cls._tokens_to_chars(allocations["patterns"]),
             summary_chars=cls._tokens_to_chars(allocations["summary"]),
@@ -268,17 +267,6 @@ class TokenBudgetService:
 
         return kept
 
-    @staticmethod
-    def truncate_tool_response(response: str, char_budget: int) -> str:
-        """Truncate a single MCP tool response to char_budget.
-
-        Appends a note so the LLM knows the response was clipped.
-        """
-        if len(response) <= char_budget:
-            return response
-        note = "\n[...response truncated to fit context window]"
-        return response[: char_budget - len(note)] + note
-
     @classmethod
     def _measure_tool_def_tokens(cls, tool_definitions: list[dict[str, Any]]) -> int:
         """Measure the actual serialized token cost of the tool definitions.
@@ -305,18 +293,16 @@ class TokenBudgetService:
         already_measured_tool_def_tokens: int,
         tool_definitions: list[dict[str, Any]],
     ) -> int:
-        """Derive the maximum number of MCP tools we can safely host.
-
-        Derives the maximum number of MCP tool definitions we can safely
-        host in the context window given num_ctx and the fixed reservations
-        (output, overhead).
+        """Derive the maximum number of MCP tool definitions we can safely host.
 
         Math:
             headroom = num_ctx - output_reservation - fixed_overhead
-            per-tool budget = headroom / per_tool_tokens  (floored)
-            floor at len(tool_definitions) so we never recommend fewer
-            than the tools already in use — going lower would break the
-            current request.
+            capacity = headroom // TOOL_DEF_AVG_TOKENS  (floored)
+            return max(capacity, len(tool_definitions))
+
+        The floor at the current count ensures we never recommend fewer
+        tools than are already wired into this request — dropping below
+        the current count would break the running request.
 
         If the *actual* measured cost of the current tool set already
         exceeds what 'headroom' can support, log a warning so the operator
@@ -331,9 +317,16 @@ class TokenBudgetService:
             # (caller can decide whether to drop tools downstream).
             return currently_used
 
-        capacity = headroom // FIXED_OVERHEAD_TOKENS
+        capacity = headroom // TOOL_DEF_AVG_TOKENS
 
-        if already_measured_tool_def_tokens > headroom and currently_used > 0:
+        # 'already_measured_tool_def_tokens' includes TOOL_SAFETY_BUFFER_TOKENS,
+        # which is *not* subtracted from headroom in the standard carve-out.
+        # Compare against headroom + buffer so the warning only fires when
+        # the underlying measured cost truly exceeds what the window can hold.
+        if (
+            already_measured_tool_def_tokens > (headroom + TOOL_SAFETY_BUFFER_TOKENS)
+            and currently_used > 0
+        ):
             logger.warning(
                 "TokenBudget: tool definitions exceed headroom "
                 "(measured=%d tokens, headroom=%d tokens, tools=%d). "
