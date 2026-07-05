@@ -46,8 +46,7 @@ class EmbeddingService:
         """Build searchable text from cron job metadata."""
         return f"{cron_job.name}. {cron_job.description}"
 
-    @staticmethod
-    def _build_text_for_mcp_server(mcp_servers: list[MCPServer]) -> str | None:
+    def _build_text_for_mcp_server(self, mcp_servers: list[MCPServer]) -> str | None:
         """Build tools description string for MCP server embedding.
 
         Returns None if no servers provided or no tools found.
@@ -60,7 +59,9 @@ class EmbeddingService:
         for mcp_server in mcp_servers:
             try:
                 tools_config = asyncio.run(
-                    MCPToolsBuilder.build_tools_from_servers(mcp_servers=[mcp_server])
+                    MCPToolsBuilder.build_tools_from_servers(
+                        bot_id=str(self.bot.id), mcp_servers=[mcp_server]
+                    )
                 )
             except Exception:
                 logger.exception("Failed to build tools from MCPServer %s", mcp_server.id)
