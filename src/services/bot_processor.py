@@ -68,7 +68,11 @@ class BotMessageProcessor:
 
         mcp_server_list = list(mcp_servers)
 
-        tools_config = asyncio.run(MCPToolsBuilder.build_tools_from_servers(mcp_server_list))
+        tools_config = asyncio.run(
+            MCPToolsBuilder.build_tools_from_servers(
+                bot_id=str(self.bot.id), mcp_servers=mcp_server_list
+            )
+        )
 
         return tools_config
 
