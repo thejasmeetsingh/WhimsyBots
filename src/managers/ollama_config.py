@@ -19,4 +19,7 @@ class OllamaConfigManager:
         """
         if cls._cached_ollama is None:
             cls._cached_ollama = Ollama.objects.first()
+        # Refresh the cached model from the database so we always return the latest
+        # persisted Ollama settings even when the cached object already exists.
+        cls._cached_ollama.refresh_from_db()
         return cls._cached_ollama

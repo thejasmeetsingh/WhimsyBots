@@ -76,9 +76,9 @@ class MCPToolsBuilder:
         for server in mcp_servers:
             key = f"{bot_id}-{str(server.id)}"
 
-            tool_config = cache.get(key)
-            if tool_config:
-                tools.append(MCPToolConfig.model_validate(tool_config))
+            cached_tools = cache.get(key)
+            if cached_tools:
+                tools.extend(cached_tools)
                 continue
 
             config = MCPToolsBuilder._build_server_config(server)
@@ -87,12 +87,11 @@ class MCPToolsBuilder:
             try:
                 mcp_tools = await mcp_client(transport_type, config)
                 for tool in mcp_tools:
-                    tool_config = MCPToolConfig(
-                        tool=tool, config=config, transport_type=transport_type
+                    tools.append(
+                        MCPToolConfig(tool=tool, config=config, transport_type=transport_type)
                     )
 
-                    tools.append(tool_config)
-                    cache.set(key, tool_config.model_dump(), timeout=MCP_TOOL_LIST_CACHE_TIMEOUT)
+                cache.set(key, tools, timeout=MCP_TOOL_LIST_CACHE_TIMEOUT)
             except Exception as _:
                 logger.error(
                     "Failed to load tools from MCP server %s",
