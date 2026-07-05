@@ -51,7 +51,11 @@ class ConversationSummaryService:
     def _set_summary_budget(self):
         # Build tools from servers
         mcp_servers = getattr(self.bot, "mcp_servers_list", [])
-        tools_config = asyncio.run(MCPToolsBuilder.build_tools_from_servers(mcp_servers))
+        tools_config = asyncio.run(
+            MCPToolsBuilder.build_tools_from_servers(
+                bot_id=str(self.bot.id), mcp_servers=mcp_servers
+            )
+        )
 
         # Derive the history token budget the same way ContextAssembler does,
         # so the split point here is always consistent with what gets sent to
