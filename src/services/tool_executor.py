@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from typing import Any, Optional
+
+from django.core.cache import cache
+from pydantic import BaseModel
 
 from app.choices import MCPTransportType
 from app.models import MCPServer
@@ -19,9 +21,11 @@ from strings import INVALID_TOOL, TOOL_EXECUTION_FAILED
 
 logger = logging.getLogger(__name__)
 
+# Redis cache timeout for MCP tool list
+MCP_TOOL_LIST_CACHE_TIMEOUT = 3600  # 1 hour
 
-@dataclass
-class MCPToolConfig:
+
+class MCPToolConfig(BaseModel):
     """Configuration for an MCP tool."""
 
     tool: dict[str, Any]
@@ -42,28 +46,53 @@ class MCPToolsBuilder:
 
     @staticmethod
     async def build_tools_from_servers(
+        bot_id: str,
         mcp_servers: list[MCPServer],
     ) -> list[MCPToolConfig]:
-        """Build MCPToolConfig instances from bot MCP servers.
+        """Build 'MCPToolConfig' instances for a bot's MCP servers.
+
+        For each 'MCPServer' in 'mcp_servers', returns a list of
+        'MCPToolConfig' objects describing every tool the server exposes,
+        using a Redis-backed cache to avoid re-querying the server on
+        repeat calls.
 
         Args:
-            mcp_servers: QuerySet of active MCP servers
+            bot_id: UUID of the bot whose tool catalog is being built.
+                Used to scope the per-server cache entry, so two bots
+                pointing at the same MCP server each get their own
+                cached tool list.
+            mcp_servers: Iterable of active 'MCPServer' instances
+                associated with the bot. Each server contributes zero
+                or more tools to the returned list.
 
         Returns:
-            List of MCPToolConfig instances
+            list[MCPToolConfig]: The combined tool catalog across all
+            provided servers. Servers that failed to load contribute
+            no entries; an empty list is returned when no servers
+            yield any tools.
         """
         tools: list[MCPToolConfig] = []
 
         for server in mcp_servers:
+            key = f"{bot_id}-{str(server.id)}"
+
+            tool_config = cache.get(key)
+            if tool_config:
+                tools.append(MCPToolConfig.model_validate(tool_config))
+                continue
+
             config = MCPToolsBuilder._build_server_config(server)
             transport_type = MCPToolsBuilder._get_transport_type(server)
 
             try:
                 mcp_tools = await mcp_client(transport_type, config)
                 for tool in mcp_tools:
-                    tools.append(
-                        MCPToolConfig(tool=tool, config=config, transport_type=transport_type)
+                    tool_config = MCPToolConfig(
+                        tool=tool, config=config, transport_type=transport_type
                     )
+
+                    tools.append(tool_config)
+                    cache.set(key, tool_config.model_dump(), timeout=MCP_TOOL_LIST_CACHE_TIMEOUT)
             except Exception as _:
                 logger.error(
                     "Failed to load tools from MCP server %s",
