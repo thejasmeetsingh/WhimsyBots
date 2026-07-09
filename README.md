@@ -24,8 +24,9 @@
 - 🔌 **MCP tool integration** — Connect any [Model Context Protocol](https://modelcontextprotocol.io) server (local stdio or remote HTTPS) to extend a bot's capabilities.
 - 🧭 **Semantic MCP tool ranking** — MCP servers are re-ranked per message using pgvector cosine similarity, so the most relevant tools surface first.
 - ⏰ **Scheduled cron jobs** — Bots can schedule themselves: create, list, update, and delete jobs through the LLM using cron expressions. Embedding-driven tool selection for scheduled tasks too.
-- 📄 **On-demand PDF reports** — Built-in PDF generator MCP server turns LLM-authored HTML into styled PDFs and ships them directly to the user's Telegram chat.
-- 🧠 **Semantic memory (pgvector)** — Every user message, cron job schedule, and MCP tool description is embedded for similarity retrieval and used to enrich context.
+- 📄 **On-demand PDF reports** — Built-in PDF generator (WeasyPrint) turns LLM-authored HTML into styled PDFs and ships them directly to the user's Telegram chat.
+- 🌐 **Built-in web search** — Default `web_search` (DuckDuckGo) and `fetch_and_extract` (article → markdown) tools give the LLM live access to the web without any extra setup.
+- 🧠 **Semantic memory (pgvector)** — Every user message, cron job schedule, and MCP tool description is embedded for similarity retrieval and used to enrich context. MCP tool lists are also cached per `(bot, server)` for 1 hour to avoid redundant discovery calls.
 - 📝 **Conversation summarisation** — Older messages are summarised into a system-role message when the context window tightens, preserving recent verbatim history.
 - 🎯 **Observed user patterns** — An async worker periodically rebuilds a behavioural profile of the user (communication style, recurring topics, preferences) and injects it into the system prompt.
 - 🔐 **Encrypted secrets at rest** — Telegram bot tokens and MCP server secrets are Fernet-encrypted in the DB, keyed off `SECRET_KEY`; lookup happens via deterministic SHA-256 hash.
@@ -153,8 +154,7 @@ WhimsyBots/
 │   ├── clients/                  # External API clients (Telegram, Ollama, MCP)
 │   ├── managers/                 # Lightweight factory / cache managers
 │   ├── services/                 # Business logic (bot processor, embeddings, rate limiter, …)
-│   ├── cron_job/                 # Standalone Cron Job MCP server (FastMCP)
-│   ├── pdf_generator/            # Standalone PDF Generator MCP server (FastMCP)
+│   ├── mcp_tools/                # In-process MCP tool registry (cron, PDF, web search)
 │   ├── utils/                    # Cross-cutting helpers (crypto, formatting, scheduling, …)
 │   ├── tests/                    # Pytest suite (test_app/, test_services/, test_utils/, …)
 │   ├── whimsybots/               # Django project (settings/, urls.py, views.py, celery.py, wsgi.py)
