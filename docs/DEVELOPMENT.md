@@ -330,8 +330,8 @@ Always wrap a task body in `try / except` so unexpected exceptions hit the retry
 
 End users add these via the admin; for code-level integration (a new bot-specific default):
 
-1. Add the `MCPServer` row via the admin (or a data migration).
-2. If the server is a *bot-specific* one, no further code is needed — the loop discovers it via `MCPToolsBuilder.build_tools_from_servers(bot_id, mcp_servers)` on every cycle.
+1. Add the `MCPServer` row via the admin.
+2. The loop discovers it via `MCPToolsBuilder.build_tools_from_servers(bot_id, mcp_servers)` on every cycle.
 3. If you want to ship a (alongside `CRON_JOB_TOOLS` etc.):
    1. Create a module under `src/mcp_tools/` and expose plain callables (no MCP transport required).
    2. Add the function → callable mapping to `FUNCTION_NAME_TO_CALLABLE_MAP` in `mcp_tools/tools.py`.
