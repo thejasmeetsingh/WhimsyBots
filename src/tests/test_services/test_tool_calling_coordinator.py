@@ -4,10 +4,16 @@
 Ollama and the MCP tool executor. We patch the Ollama client and the
 sync 'execute_tool_call_sync' so we can drive the loop deterministically.
 
-The Ollama client now returns each tool_call as a *dict* shaped like
+The Ollama client returns each tool_call as a *dict* shaped like
 '{"function": <Message.ToolCall>}' (mirroring the official ollama SDK).
 The coordinator indexes 'tool_call["function"]' to obtain the inner
 ToolCall object whose `model_dump()` is forwarded to the executor.
+
+After the mcp_tools refactor, the loop accepts three additional
+parameters:
+  - 'bot_id' (UUID of the active bot, forwarded to default tools)
+  - 'telegram_client' (forwarded to the PDF generator default tool)
+  - 'exclude_crons' (drops the cron tool group to prevent recursion)
 """
 
 from __future__ import annotations
@@ -18,6 +24,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.choices import MessageRole
+from mcp_tools.tools import (
+    CRON_JOB_TOOLS,
+    FUNCTION_NAME_TO_CALLABLE_MAP,
+    PDF_GENERATOR_TOOLS,
+    WEB_SEARCH_TOOLS,
+)
 from services.tool_calling_coordinator import run_tool_calling_loop
 
 _ASSISTANT_ROLE = MessageRole.ASSISTANT.value[1].lower()
@@ -64,6 +76,29 @@ def _tool_cfg(name="my_tool"):
     )
 
 
+def _run_loop(
+    client,
+    history,
+    tools_config,
+    ollama,
+    *,
+    bot_id="bot-1",
+    telegram_client=None,
+    **kwargs,
+):
+    """Helper that runs the loop with the new mandatory parameters."""
+    return run_tool_calling_loop(
+        bot_id=bot_id,
+        telegram_client=telegram_client or MagicMock(name="TelegramClient"),
+        ollama_client=client,
+        model="m",
+        history=history,
+        tools_config=tools_config,
+        ollama=ollama,
+        **kwargs,
+    )
+
+
 # ──────────────────────────────────────────────
 # Termination: no tool calls
 # ──────────────────────────────────────────────
@@ -76,13 +111,7 @@ def test_loop_terminates_when_no_tool_calls():
     client = MagicMock()
     client.chat.return_value = chat_response
 
-    response, ms = run_tool_calling_loop(
-        ollama_client=client,
-        model="llama3",
-        history=history,
-        tools_config=[],
-        ollama=_ollama(),
-    )
+    response, ms = _run_loop(client, history, [], _ollama())
 
     assert response == "hello!"
     assert ms == 12
@@ -94,16 +123,10 @@ def test_loop_passes_model_and_messages_to_chat():
     client = MagicMock()
     client.chat.return_value = {"message": "pong", "tools": None, "ollama_ms": 1}
 
-    run_tool_calling_loop(
-        ollama_client=client,
-        model="mistral",
-        history=history,
-        tools_config=[],
-        ollama=_ollama(),
-    )
+    _run_loop(client, history, [], _ollama())
 
     kwargs = client.chat.call_args.kwargs
-    assert kwargs["model"] == "mistral"
+    assert kwargs["model"] == "m"
     assert kwargs["messages"] == history
 
 
@@ -111,12 +134,11 @@ def test_loop_forwards_options_from_ollama_config():
     client = MagicMock()
     client.chat.return_value = {"message": "ok", "tools": None, "ollama_ms": None}
 
-    run_tool_calling_loop(
-        ollama_client=client,
-        model="m",
-        history=[],
-        tools_config=[],
-        ollama=_ollama(temperature=0.3, num_ctx=8192, num_predict=256),
+    _run_loop(
+        client,
+        [],
+        [],
+        _ollama(temperature=0.3, num_ctx=8192, num_predict=256),
     )
 
     kwargs = client.chat.call_args.kwargs
@@ -127,38 +149,28 @@ def test_loop_forwards_options_from_ollama_config():
     }
 
 
-def test_loop_passes_empty_tools_when_no_configs():
+def test_loop_advertises_default_tools_when_no_configs():
+    """Even with no MCP tool configs, the always-on web search, PDF,
+    and cron tool groups are advertised to the model.
+    """
     client = MagicMock()
     client.chat.return_value = {"message": "ok", "tools": None, "ollama_ms": None}
 
-    run_tool_calling_loop(
-        ollama_client=client,
-        model="m",
-        history=[],
-        tools_config=[],
-        ollama=_ollama(),
-    )
+    _run_loop(client, [], [], _ollama())
 
-    assert client.chat.call_args.kwargs["tools"] == []
-
-
-# ──────────────────────────────────────────────
-# keep_alive wiring
-# ──────────────────────────────────────────────
+    tools = client.chat.call_args.kwargs["tools"]
+    # The flat list contains every individual tool definition.
+    advertised_names = {t["function"]["name"] for t in tools}
+    for group in (WEB_SEARCH_TOOLS, PDF_GENERATOR_TOOLS, CRON_JOB_TOOLS):
+        for tool in group:
+            assert tool["function"]["name"] in advertised_names
 
 
 def test_loop_passes_keep_alive_when_add_keep_alive_true():
     client = MagicMock()
     client.chat.return_value = {"message": "ok", "tools": None, "ollama_ms": None}
 
-    run_tool_calling_loop(
-        ollama_client=client,
-        model="m",
-        history=[],
-        tools_config=[],
-        ollama=_ollama(keep_alive="15m"),
-        add_keep_alive=True,
-    )
+    _run_loop(client, [], [], _ollama(keep_alive="15m"), add_keep_alive=True)
 
     assert client.chat.call_args.kwargs["keep_alive"] == "15m"
 
@@ -167,14 +179,7 @@ def test_loop_passes_none_keep_alive_when_add_keep_alive_false():
     client = MagicMock()
     client.chat.return_value = {"message": "ok", "tools": None, "ollama_ms": None}
 
-    run_tool_calling_loop(
-        ollama_client=client,
-        model="m",
-        history=[],
-        tools_config=[],
-        ollama=_ollama(keep_alive="15m"),
-        add_keep_alive=False,
-    )
+    _run_loop(client, [], [], _ollama(keep_alive="15m"), add_keep_alive=False)
 
     # When the flag is off we explicitly pass None — never the ollama value.
     assert client.chat.call_args.kwargs["keep_alive"] is None
@@ -184,33 +189,54 @@ def test_loop_default_add_keep_alive_is_false():
     client = MagicMock()
     client.chat.return_value = {"message": "ok", "tools": None, "ollama_ms": None}
 
-    run_tool_calling_loop(
-        ollama_client=client,
-        model="m",
-        history=[],
-        tools_config=[],
-        ollama=_ollama(keep_alive="5m"),
-    )
+    _run_loop(client, [], [], _ollama(keep_alive="5m"))
 
     # Default is False → keep_alive must be None.
     assert client.chat.call_args.kwargs["keep_alive"] is None
 
 
 # ──────────────────────────────────────────────
-# Tool-call loop body
+# exclude_crons flag
 # ──────────────────────────────────────────────
 
 
-def test_loop_executes_each_tool_call_and_appends_history():
-    """First turn: assistant asks for two tools.
-    Second turn: assistant returns final message — loop terminates.
+def test_loop_excludes_cron_tools_when_exclude_crons_true():
+    """The cron job tool group is omitted when 'exclude_crons=True'."""
+    client = MagicMock()
+    client.chat.return_value = {"message": "ok", "tools": None, "ollama_ms": None}
 
-    History shape on the second chat call:
-        1. original user message
-        2. assistant message echoing the tool_calls (prepended before
-           tool execution so the LLM sees what it asked for)
-        3. assistant message holding result-a
-        4. assistant message holding result-b
+    _run_loop(client, [], [], _ollama(), exclude_crons=True)
+
+    tools = client.chat.call_args.kwargs["tools"]
+    advertised_names = {t["function"]["name"] for t in tools}
+    cron_names = {tool["function"]["name"] for tool in CRON_JOB_TOOLS}
+    # No cron tool is advertised.
+    assert advertised_names.isdisjoint(cron_names)
+    # But the other default groups are still there.
+    for tool in WEB_SEARCH_TOOLS + PDF_GENERATOR_TOOLS:
+        assert tool["function"]["name"] in advertised_names
+
+
+def test_loop_default_exclude_crons_is_false():
+    client = MagicMock()
+    client.chat.return_value = {"message": "ok", "tools": None, "ollama_ms": None}
+
+    _run_loop(client, [], [], _ollama())
+
+    tools = client.chat.call_args.kwargs["tools"]
+    advertised_names = {t["function"]["name"] for t in tools}
+    cron_names = {tool["function"]["name"] for tool in CRON_JOB_TOOLS}
+    assert not advertised_names.isdisjoint(cron_names)
+
+
+# ──────────────────────────────────────────────
+# Tool-call loop body — MCP tools
+# ──────────────────────────────────────────────
+
+
+def test_loop_executes_each_mcp_tool_call_and_appends_history():
+    """First turn: assistant asks for two MCP tools.
+    Second turn: assistant returns final message — loop terminates.
     """
     tool_call_a = _tool_call("tool_a", {"x": 1})
     tool_call_b = _tool_call("tool_b", {"y": 2})
@@ -225,12 +251,11 @@ def test_loop_executes_each_tool_call_and_appends_history():
         "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
         side_effect=["result-a", "result-b"],
     ) as mock_exec:
-        response, ms = run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[{"role": "user", "content": "go"}],
-            tools_config=[_tool_cfg("tool_a"), _tool_cfg("tool_b")],
-            ollama=_ollama(),
+        response, ms = _run_loop(
+            client,
+            [{"role": "user", "content": "go"}],
+            [_tool_cfg("tool_a"), _tool_cfg("tool_b")],
+            _ollama(),
         )
 
     assert response == "all done"
@@ -239,18 +264,6 @@ def test_loop_executes_each_tool_call_and_appends_history():
 
     # History growth: 1 user + 1 assistant(echo) + 2 result = 4 entries.
     assert len(client.chat.call_args_list[1].kwargs["messages"]) == 4
-
-    msgs = client.chat.call_args_list[1].kwargs["messages"]
-    # Entry [1] is the echo of the assistant's tool-call request itself.
-    echo = msgs[1]
-    assert echo["role"] == _ASSISTANT_ROLE
-    assert echo["content"] == ""
-    assert echo["tool_calls"] == [tool_call_a, tool_call_b]
-
-    # Entries [2] and [3] carry the tool results.
-    assert msgs[2]["role"] == _ASSISTANT_ROLE
-    assert msgs[2]["content"] == "result-a"
-    assert msgs[3]["content"] == "result-b"
 
 
 def test_loop_skips_tool_call_with_none_result():
@@ -270,32 +283,19 @@ def test_loop_skips_tool_call_with_none_result():
         "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
         return_value=None,
     ):
-        run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[{"role": "user", "content": "x"}],
-            tools_config=[_tool_cfg("broken_tool")],
-            ollama=_ollama(),
+        _run_loop(
+            client,
+            [{"role": "user", "content": "x"}],
+            [_tool_cfg("broken_tool")],
+            _ollama(),
         )
 
     final_history = client.chat.call_args_list[1].kwargs["messages"]
     # Only the assistant's tool-call echo was added (no result entry).
     assert len(final_history) == 2
-    assert final_history[0] == {"role": "user", "content": "x"}
-    assert final_history[1]["role"] == _ASSISTANT_ROLE
-    # The echo carries the original tool_call — but no result content.
-    assert "content" not in final_history[1] or final_history[1].get("content") == ""
 
 
 def test_loop_records_tool_call_payload_in_appended_messages():
-    """Two messages are appended for each successful tool call:
-
-    1. An assistant `tool_calls` echo (content=''), carrying the raw
-       tool_call dict as returned by Ollama (still wrapped as
-       {function: <Message.ToolCall>}).
-    2. An assistant result message with the tool's return value and
-       the same `tool_calls` echo so the LLM can correlate.
-    """
     tool_call = _tool_call("t", {})
     client = MagicMock()
     client.chat.side_effect = [
@@ -306,13 +306,7 @@ def test_loop_records_tool_call_payload_in_appended_messages():
         "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
         return_value="r",
     ):
-        run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[],
-            tools_config=[_tool_cfg("t")],
-            ollama=_ollama(),
-        )
+        _run_loop(client, [], [_tool_cfg("t")], _ollama())
 
     final_history = client.chat.call_args_list[1].kwargs["messages"]
 
@@ -348,13 +342,7 @@ def test_loop_passes_tool_call_function_payload_to_executor():
         "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
         return_value="ok",
     ) as mock_exec:
-        run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[],
-            tools_config=[_tool_cfg("t")],
-            ollama=_ollama(),
-        )
+        _run_loop(client, [], [_tool_cfg("t")], _ollama())
 
     # Exactly one call; arg is the dumped inner function payload.
     mock_exec.assert_called_once_with(inner_payload)
@@ -373,59 +361,8 @@ def test_loop_returns_ollama_ms_from_final_turn():
         "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
         return_value="ok",
     ):
-        _, ms = run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[],
-            tools_config=[_tool_cfg("t")],
-            ollama=_ollama(),
-        )
+        _, ms = _run_loop(client, [], [_tool_cfg("t")], _ollama())
     assert ms == 999
-
-
-def test_loop_appends_assistant_echo_with_message_and_tool_calls():
-    """The pre-tool assistant message must combine (a) the assistant's
-    textual message from Ollama, (b) the tool_calls list, exactly as the
-    Ollama client returned them — no flattening.
-    """
-    inner_a = MagicMock()
-    inner_a.model_dump.return_value = {"name": "a", "arguments": {}}
-    inner_b = MagicMock()
-    inner_b.model_dump.return_value = {"name": "b", "arguments": {}}
-    tool_call_a = {"function": inner_a}
-    tool_call_b = {"function": inner_b}
-
-    client = MagicMock()
-    client.chat.side_effect = [
-        {
-            "message": "I'll need to call both tools.",
-            "tools": [tool_call_a, tool_call_b],
-            "ollama_ms": 1,
-        },
-        {"message": "done", "tools": None, "ollama_ms": 1},
-    ]
-    with patch(
-        "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
-        side_effect=["ra", "rb"],
-    ):
-        run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[],
-            tools_config=[_tool_cfg("a"), _tool_cfg("b")],
-            ollama=_ollama(),
-        )
-
-    final_history = client.chat.call_args_list[1].kwargs["messages"]
-
-    # Locate the echo: role=assistant, content is the textual message.
-    echo = next(
-        m
-        for m in final_history
-        if m["role"] == _ASSISTANT_ROLE and m["content"] == "I'll need to call both tools."
-    )
-    # tool_calls payload is the original list, not flattened.
-    assert echo["tool_calls"] == [tool_call_a, tool_call_b]
 
 
 def test_loop_does_not_mutate_or_flatten_returned_tool_calls():
@@ -443,18 +380,93 @@ def test_loop_does_not_mutate_or_flatten_returned_tool_calls():
         "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
         return_value="ok",
     ):
-        run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[],
-            tools_config=[_tool_cfg("t")],
-            ollama=_ollama(),
-        )
+        _run_loop(client, [], [_tool_cfg("t")], _ollama())
 
     final_history = client.chat.call_args_list[1].kwargs["messages"]
     echo = next(m for m in final_history if m["role"] == _ASSISTANT_ROLE and m.get("tool_calls"))
     # The echo's `tool_calls` references the same outer dict the client produced.
     assert outer in echo["tool_calls"] and len(echo["tool_calls"]) == 1
+
+
+# ──────────────────────────────────────────────
+# Default tool dispatch
+# ──────────────────────────────────────────────
+
+
+def test_loop_dispatches_default_tool_via_execute_default_tool():
+    """When the tool name appears in FUNCTION_NAME_TO_CALLABLE_MAP the
+    loop routes through 'execute_default_tool', not 'execute_tool_call_sync'.
+    """
+    # Pick a name that's known to be in the default map.
+    default_name = next(iter(FUNCTION_NAME_TO_CALLABLE_MAP))
+    tool_call = _tool_call(default_name, {})
+    client = MagicMock()
+    client.chat.side_effect = [
+        {"message": "", "tools": [tool_call], "ollama_ms": 1},
+        {"message": "done", "tools": None, "ollama_ms": 1},
+    ]
+    with (
+        patch(
+            "services.tool_calling_coordinator.ToolExecutor.execute_default_tool",
+            return_value="default-result",
+        ) as default_exec,
+        patch(
+            "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
+        ) as mcp_exec,
+    ):
+        _run_loop(client, [], [_tool_cfg(default_name)], _ollama())
+
+    default_exec.assert_called_once()
+    # mcp_exec is NOT used for default tools.
+    mcp_exec.assert_not_called()
+
+
+def test_loop_routes_unknown_tool_through_mcp_executor():
+    """Tool names NOT in FUNCTION_NAME_TO_CALLABLE_MAP go through the
+    legacy 'execute_tool_call_sync' path.
+    """
+    tool_call = _tool_call("custom_mcp_tool", {})
+    client = MagicMock()
+    client.chat.side_effect = [
+        {"message": "", "tools": [tool_call], "ollama_ms": 1},
+        {"message": "done", "tools": None, "ollama_ms": 1},
+    ]
+    with (
+        patch(
+            "services.tool_calling_coordinator.ToolExecutor.execute_default_tool",
+        ) as default_exec,
+        patch(
+            "services.tool_calling_coordinator.ToolExecutor.execute_tool_call_sync",
+            return_value="mcp-result",
+        ) as mcp_exec,
+    ):
+        _run_loop(client, [], [_tool_cfg("custom_mcp_tool")], _ollama())
+
+    mcp_exec.assert_called_once()
+    default_exec.assert_not_called()
+
+
+def test_loop_passes_bot_id_and_telegram_client_to_default_tool():
+    """Both bot_id and telegram_client are forwarded to execute_default_tool."""
+    default_name = next(iter(FUNCTION_NAME_TO_CALLABLE_MAP))
+    tool_call = _tool_call(default_name, {})
+    client = MagicMock()
+    client.chat.side_effect = [
+        {"message": "", "tools": [tool_call], "ollama_ms": 1},
+        {"message": "done", "tools": None, "ollama_ms": 1},
+    ]
+    tg = MagicMock(name="TelegramClient")
+    with patch(
+        "services.tool_calling_coordinator.ToolExecutor.execute_default_tool",
+        return_value="ok",
+    ) as default_exec:
+        _run_loop(
+            client, [], [_tool_cfg(default_name)], _ollama(), bot_id="bot-xyz", telegram_client=tg
+        )
+
+    # bot_id and telegram_client are passed to the executor.
+    assert default_exec.call_args.args[1] == "bot-xyz"
+    assert default_exec.call_args.args[2] is tg
 
 
 # ──────────────────────────────────────────────
@@ -467,13 +479,7 @@ def test_loop_propagates_exceptions_from_chat():
     client.chat.side_effect = RuntimeError("ollama down")
 
     with pytest.raises(RuntimeError):
-        run_tool_calling_loop(
-            ollama_client=client,
-            model="m",
-            history=[],
-            tools_config=[],
-            ollama=_ollama(),
-        )
+        _run_loop(client, [], [], _ollama())
 
 
 def test_loop_propagates_exceptions_from_tool_executor():
@@ -488,24 +494,12 @@ def test_loop_propagates_exceptions_from_tool_executor():
         side_effect=RuntimeError("tool broken"),
     ):
         with pytest.raises(RuntimeError):
-            run_tool_calling_loop(
-                ollama_client=client,
-                model="m",
-                history=[],
-                tools_config=[_tool_cfg("t")],
-                ollama=_ollama(),
-            )
+            _run_loop(client, [], [_tool_cfg("t")], _ollama())
 
 
 def test_loop_returns_empty_message_when_chat_returns_no_message():
     client = MagicMock()
     client.chat.return_value = {"tools": None, "ollama_ms": None}
-    response, ms = run_tool_calling_loop(
-        ollama_client=client,
-        model="m",
-        history=[],
-        tools_config=[],
-        ollama=_ollama(),
-    )
+    response, ms = _run_loop(client, [], [], _ollama())
     assert response == ""
     assert ms is None

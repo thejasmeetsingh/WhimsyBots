@@ -71,27 +71,30 @@ def test_build_text_for_cron_job_handles_empty_description():
 
 
 def test_build_text_for_mcp_server_returns_none_for_empty_list():
-    assert EmbeddingService._build_text_for_mcp_server([]) is None
+    svc = EmbeddingService(bot=_bot(), ollama=_ollama())
+    assert svc._build_text_for_mcp_server([]) is None
 
 
 def test_build_text_for_mcp_server_returns_none_when_no_tools_buildable():
     # If the builder raises for every server, we should return None
     # rather than crash — callers treat None as "skip embedding".
+    svc = EmbeddingService(bot=_bot(), ollama=_ollama())
     with patch(
         "services.embedding.MCPToolsBuilder.build_tools_from_servers",
         side_effect=RuntimeError("boom"),
     ):
-        result = EmbeddingService._build_text_for_mcp_server([_mcp()])
+        result = svc._build_text_for_mcp_server([_mcp()])
     assert result is None
 
 
 def test_build_text_for_mcp_server_returns_none_when_no_tools_described():
     # The builder returns an empty list — no tool descriptions ⇒ None.
+    svc = EmbeddingService(bot=_bot(), ollama=_ollama())
     with patch(
         "services.embedding.MCPToolsBuilder.build_tools_from_servers",
         return_value=[],
     ):
-        result = EmbeddingService._build_text_for_mcp_server([_mcp()])
+        result = svc._build_text_for_mcp_server([_mcp()])
     assert result is None
 
 
@@ -99,22 +102,24 @@ def test_build_text_for_mcp_server_includes_tool_name_and_description():
     cfg = SimpleNamespace(
         tool={"function": {"name": "fetch_weather", "description": "Look up weather"}}
     )
+    svc = EmbeddingService(bot=_bot(), ollama=_ollama())
     with patch(
         "services.embedding.MCPToolsBuilder.build_tools_from_servers",
         return_value=[cfg],
     ):
-        result = EmbeddingService._build_text_for_mcp_server([_mcp()])
+        result = svc._build_text_for_mcp_server([_mcp()])
     assert "fetch_weather" in result
     assert "Look up weather" in result
 
 
 def test_build_text_for_mcp_server_skips_malformed_tool_configs():
     bad_cfg = SimpleNamespace(tool={"function": {"name": "ok"}})  # no description
+    svc = EmbeddingService(bot=_bot(), ollama=_ollama())
     with patch(
         "services.embedding.MCPToolsBuilder.build_tools_from_servers",
         return_value=[bad_cfg],
     ):
-        result = EmbeddingService._build_text_for_mcp_server([_mcp()])
+        result = svc._build_text_for_mcp_server([_mcp()])
     # Missing description ⇒ skipped ⇒ no usable text ⇒ None.
     assert result is None
 
@@ -122,15 +127,34 @@ def test_build_text_for_mcp_server_skips_malformed_tool_configs():
 def test_build_text_for_mcp_server_concatenates_multiple_tools():
     cfg1 = SimpleNamespace(tool={"function": {"name": "tool_a", "description": "alpha"}})
     cfg2 = SimpleNamespace(tool={"function": {"name": "tool_b", "description": "beta"}})
+    svc = EmbeddingService(bot=_bot(), ollama=_ollama())
     with patch(
         "services.embedding.MCPToolsBuilder.build_tools_from_servers",
         return_value=[cfg1, cfg2],
     ):
-        result = EmbeddingService._build_text_for_mcp_server([_mcp()])
+        result = svc._build_text_for_mcp_server([_mcp()])
     assert "tool_a" in result
     assert "tool_b" in result
     # Entries are joined by ".\n".
     assert ".\n" in result
+
+
+def test_build_text_for_mcp_server_passes_bot_id_to_builder():
+    """The bot id is forwarded to the builder so it can scope its
+    Redis-backed tool-list cache per bot.
+    """
+    bot = _bot()
+    bot.id = "bot-uuid"
+    svc = EmbeddingService(bot=bot, ollama=_ollama())
+    cfg = SimpleNamespace(
+        tool={"function": {"name": "fetch_weather", "description": "Look up weather"}}
+    )
+    with patch(
+        "services.embedding.MCPToolsBuilder.build_tools_from_servers",
+        return_value=[cfg],
+    ) as builder:
+        svc._build_text_for_mcp_server([_mcp()])
+    assert builder.call_args.kwargs["bot_id"] == "bot-uuid"
 
 
 # ──────────────────────────────────────────────
@@ -301,8 +325,8 @@ def test_get_relevant_memories_returns_empty_on_dimension_mismatch():
 
 def test_get_relevant_memories_returns_empty_on_dimension_mismatch_even_when_logging():
     """The dimension-mismatch path must early-return without DB activity,
-    even though the warning itself references len(query_vector)."""
-
+    even though the warning itself references len(query_vector).
+    """
     svc = EmbeddingService(bot=_bot(embedding_dimensions=768), ollama=_ollama())
     # 100 dims vs 768 expected → mismatch.
     result = svc.get_relevant_memories(query_vector=[0.1] * 100)
