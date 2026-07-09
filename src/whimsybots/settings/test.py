@@ -1,6 +1,19 @@
 from whimsybots.settings.base import *  # noqa
 
 # ──────────────────────────────────────────────
+# WeasyPrint stub
+# ──────────────────────────────────────────────
+# WeasyPrint requires native libraries ('libgobject-2.0-0', etc.) that
+# are not guaranteed to be present on every CI worker. The mcp_tools
+# module is imported via the app's admin registration, so we stub the
+# 'weasyprint' module *before* Django's app registry is populated.
+import sys as _sys  # noqa: E402
+from unittest.mock import MagicMock as _MagicMock  # noqa: E402
+
+if "weasyprint" not in _sys.modules:
+    _sys.modules["weasyprint"] = _MagicMock(name="weasyprint-stub")
+
+# ──────────────────────────────────────────────
 # Secret key – the base settings pull SECRET_KEY from the environment,
 # which is unset in CI / local dev. Anything that touches
 # django.conf.settings (e.g. utils.crypto.get_fernet) needs a
@@ -83,6 +96,11 @@ _pgvector_module.HnswIndex = MagicMock()
 _pgvector_module.IvfflatIndex = MagicMock()
 sys.modules.setdefault("pgvector", MagicMock())
 sys.modules["pgvector.django"] = _pgvector_module
+# Migration 0002_initial.py does `import pgvector.django.vector`; stub that
+# sub-module too so the migration can be loaded under the SQLite shim.
+sys.modules.setdefault("pgvector.django.vector", MagicMock())
+# Some migrations also import from pgvector directly; the stub for the
+# parent package above covers that.
 
 
 # ──────────────────────────────────────────────
