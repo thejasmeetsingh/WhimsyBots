@@ -52,9 +52,5 @@ jobs:
           SECRET_KEY: ci-secret-key
         run: pytest -v --maxfail=1 --tb=short
 
-      - name: Install ruff
-        run: pip install ruff
-
       - name: Lint
-        working-directory: src
-        run: ruff check --config src/pyproject.toml src/ || true
+        run: make lint
