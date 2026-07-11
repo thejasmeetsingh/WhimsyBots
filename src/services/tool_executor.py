@@ -2,23 +2,34 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+
+from django.core.cache import cache
+from pydantic import BaseModel
 
 from app.choices import MCPTransportType
 from app.models import MCPServer
 from clients import mcp_client
+from clients.telegram import TelegramClient
+from mcp_tools.tools import (
+    FETCH_AND_EXTRACT,
+    FUNCTION_NAME_TO_CALLABLE_MAP,
+    GENERATE_PDF,
+    WEB_SEARCH,
+)
 from strings import INVALID_TOOL, TOOL_EXECUTION_FAILED
 
 logger = logging.getLogger(__name__)
 
+# Redis cache timeout for MCP tool list
+MCP_TOOL_LIST_CACHE_TIMEOUT = 3600  # 1 hour
 
-@dataclass
-class MCPToolConfig:
+
+class MCPToolConfig(BaseModel):
     """Configuration for an MCP tool."""
 
-    tool: Dict[str, Any]
-    config: Dict[str, Any]
+    tool: dict[str, Any]
+    config: dict[str, Any]
     transport_type: str
 
     def get_transport(self) -> str:
@@ -35,19 +46,41 @@ class MCPToolsBuilder:
 
     @staticmethod
     async def build_tools_from_servers(
+        bot_id: str,
         mcp_servers: list[MCPServer],
-    ) -> List[MCPToolConfig]:
-        """Build MCPToolConfig instances from bot MCP servers.
+    ) -> list[MCPToolConfig]:
+        """Build 'MCPToolConfig' instances for a bot's MCP servers.
+
+        For each 'MCPServer' in 'mcp_servers', returns a list of
+        'MCPToolConfig' objects describing every tool the server exposes,
+        using a Redis-backed cache to avoid re-querying the server on
+        repeat calls.
 
         Args:
-            mcp_servers: QuerySet of active MCP servers
+            bot_id: UUID of the bot whose tool catalog is being built.
+                Used to scope the per-server cache entry, so two bots
+                pointing at the same MCP server each get their own
+                cached tool list.
+            mcp_servers: Iterable of active 'MCPServer' instances
+                associated with the bot. Each server contributes zero
+                or more tools to the returned list.
 
         Returns:
-            List of MCPToolConfig instances
+            list[MCPToolConfig]: The combined tool catalog across all
+            provided servers. Servers that failed to load contribute
+            no entries; an empty list is returned when no servers
+            yield any tools.
         """
         tools: list[MCPToolConfig] = []
 
         for server in mcp_servers:
+            key = f"{bot_id}-{str(server.id)}"
+
+            cached_tools = cache.get(key)
+            if cached_tools:
+                tools.extend(cached_tools)
+                continue
+
             config = MCPToolsBuilder._build_server_config(server)
             transport_type = MCPToolsBuilder._get_transport_type(server)
 
@@ -57,6 +90,8 @@ class MCPToolsBuilder:
                     tools.append(
                         MCPToolConfig(tool=tool, config=config, transport_type=transport_type)
                     )
+
+                cache.set(key, tools, timeout=MCP_TOOL_LIST_CACHE_TIMEOUT)
             except Exception as _:
                 logger.error(
                     "Failed to load tools from MCP server %s",
@@ -67,7 +102,7 @@ class MCPToolsBuilder:
         return tools
 
     @staticmethod
-    def _build_server_config(server: MCPServer) -> Dict[str, Any]:
+    def _build_server_config(server: MCPServer) -> dict[str, Any]:
         """Build configuration dictionary from MCP server."""
         if server.transport == MCPTransportType.LOCAL.value[0]:
             return {
@@ -87,7 +122,7 @@ class MCPToolsBuilder:
 class ToolExecutor:
     """Service for executing MCP tools."""
 
-    def __init__(self, tools: List[MCPToolConfig]):
+    def __init__(self, tools: list[MCPToolConfig]):
         """Initialize the executor.
 
         Args:
@@ -95,7 +130,7 @@ class ToolExecutor:
         """
         self.tools = tools
 
-    def find_tool_by_call(self, tool_call: Dict[str, Any]) -> Optional[MCPToolConfig]:
+    def find_tool_by_call(self, tool_call: dict[str, Any]) -> Optional[MCPToolConfig]:
         """Find a tool matching the given tool call.
 
         Args:
@@ -114,7 +149,7 @@ class ToolExecutor:
         return None
 
     async def execute_tool(
-        self, tool_config: MCPToolConfig, payload: Dict[str, Any] | None = None
+        self, tool_config: MCPToolConfig, payload: dict[str, Any] | None = None
     ) -> str:
         """Execute an MCP tool and return the result.
 
@@ -147,7 +182,7 @@ class ToolExecutor:
             logger.error("Tool execution failed", exc_info=True)
             raise
 
-    def execute_tool_call_sync(self, tool_call: Dict[str, Any]) -> Optional[str]:
+    def execute_tool_call_sync(self, tool_call: dict[str, Any]) -> Optional[str]:
         """Execute a tool call synchronously.
 
         Args:
@@ -167,3 +202,53 @@ class ToolExecutor:
         except Exception as _:
             logger.error("Failed to execute tool call", exc_info=True)
             return TOOL_EXECUTION_FAILED
+
+    def execute_default_tool(
+        self,
+        tool_call: dict[str, Any],
+        bot_id: Optional[str] = None,
+        telegram_client: Optional[TelegramClient] = None,
+    ) -> Optional[str]:
+        """Execute a built-in default tool defined in 'mcp_tools'.
+
+        Unlike 'execute_tool_call_sync', this path handles tools shipped with the
+        project (cron job management, web search, PDF generation) that run as
+        plain callables rather than remote/local MCP servers. It looks up the
+        matching function in 'FUNCTION_NAME_TO_CALLABLE_MAP', injects the
+        required runtime context ('bot_id' for cron tools, 'telegram_client'
+        for PDF generation), and dispatches the call.
+
+        Args:
+            tool_call: The tool call from the Ollama response. Expected to
+                contain a 'name' and an 'arguments' dict.
+            bot_id: UUID of the bot invoking the tool. Forwarded to cron job
+                tools. Ignored by 'web_search'/'fetch_and_extract'.
+            telegram_client: Active 'TelegramClient' used by the PDF
+                generator tool. Ignored by other tools.
+
+        Returns:
+            Optional[str]: The tool's string result on success, or a
+            preformatted 'INVALID_TOOL' error message if the tool name has no
+            registered callable. Returns None if the underlying callable
+            returns None.
+        """
+        tool_name: str = tool_call.get("name", "")
+        tool_args: dict[str, Any] = tool_call.get("arguments", {})
+
+        logger.info("Calling '%s' default tool...", tool_name)
+
+        if tool_name not in {WEB_SEARCH, FETCH_AND_EXTRACT}:
+            if tool_name == GENERATE_PDF:
+                tool_args.update({"client": telegram_client})
+            else:
+                tool_args.update({"bot_id": bot_id})
+
+        _callable = FUNCTION_NAME_TO_CALLABLE_MAP.get(tool_name)
+        if not _callable:
+            return INVALID_TOOL.format(tool=tool_name)
+
+        try:
+            return _callable(**tool_args)
+        except Exception as e:
+            logger.error("Failed to execute tool call", exc_info=True)
+            return TOOL_EXECUTION_FAILED + f": {str(e)}"

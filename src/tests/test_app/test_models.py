@@ -1,8 +1,14 @@
 """Tests for 'src/app/models.py'.
 
-We exercise 'Bot.save', 'MCPServer.clean', and 'MCPServer.get_default_mcp_servers'
-without hitting the real DB. 'super().save()' is patched per-test so we can
-verify both the hash population logic and the 'clean()' validator chain.
+We exercise 'Bot.save' and 'MCPServer.clean' without hitting the real
+DB. 'super().save()' is patched per-test so we can verify both the
+hash population logic and the 'clean()' validator chain.
+
+Note: 'MCPServer.get_default_mcp_servers' was removed when the
+'cron_job' and 'pdf_generator' standalone MCP server packages were
+replaced with the in-process 'mcp_tools' registry. The default tool
+catalog is now exposed by 'mcp_tools.tools.CRON_JOB_TOOLS',
+'PDF_GENERATOR_TOOLS', and 'WEB_SEARCH_TOOLS' — see 'test_mcp_tools/'.
 """
 
 from __future__ import annotations
@@ -11,7 +17,6 @@ from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.test import override_settings
 
 from app.choices import MCPTransportType
 from app.models import Bot, MCPServer
@@ -157,151 +162,15 @@ def test_mcp_server_clean_calls_super_clean():
 
 
 # ──────────────────────────────────────────────
-# MCPServer.get_default_mcp_servers
+# Sanity: default tool catalog moved to mcp_tools
 # ──────────────────────────────────────────────
 
 
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_returns_three_servers():
-    """Three defaults must be returned: 'cron_job', 'time', 'pdf_generator'."""
+def test_default_mcp_servers_factory_was_removed():
+    """The old 'MCPServer.get_default_mcp_servers' class method was
+    retired when 'cron_job' / 'pdf_generator' were folded into the
+    'mcp_tools' registry. The replacement lives in
+    'mcp_tools.tools.{CRON_JOB_TOOLS,PDF_GENERATOR_TOOLS,WEB_SEARCH_TOOLS}'.
+    """
 
-    # Patch is set up to ensure the static method path is reachable even
-    # though we exercise the real implementation below.
-    with patch.object(MCPServer, "get_default_mcp_servers"):
-        pass
-
-    servers = MCPServer.get_default_mcp_servers()
-    assert set(servers.keys()) == {"cron_job", "time", "pdf_generator"}
-    assert all(isinstance(s, MCPServer) for s in servers.values())
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_all_use_local_transport():
-    servers = MCPServer.get_default_mcp_servers()
-    for name, server in servers.items():
-        assert server.transport == MCPTransportType.LOCAL.value[0], (
-            f"{name} expected LOCAL transport"
-        )
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_use_python_command():
-    servers = MCPServer.get_default_mcp_servers()
-    for name, server in servers.items():
-        assert server.command == "python", f"{name} should use python command"
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_cron_job_args():
-    """'cron_job' must be invoked via 'python -m cron_job'."""
-
-    servers = MCPServer.get_default_mcp_servers()
-    assert servers["cron_job"].args == ["-m", "cron_job"]
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_time_args():
-    servers = MCPServer.get_default_mcp_servers()
-    assert servers["time"].args == ["-m", "mcp_server_time"]
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_pdf_generator_args():
-    servers = MCPServer.get_default_mcp_servers()
-    assert servers["pdf_generator"].args == ["-m", "pdf_generator"]
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_cron_job_secrets():
-    """'cron_job' secrets must include DB credentials for the DB subsystem."""
-
-    servers = MCPServer.get_default_mcp_servers()
-    secrets = servers["cron_job"].secrets
-    assert secrets == {
-        "DB_NAME": "test_db",
-        "DB_USER": "test_user",
-        "DB_PASSWORD": "test_pw",
-        "DB_HOST": "test-host",
-    }
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-    SECRET_KEY="my-secret",
-)
-def test_get_default_mcp_servers_pdf_generator_secrets():
-    """'pdf_generator' secrets include DB credentials + SECRET_KEY for token
-    decryption."""
-
-    servers = MCPServer.get_default_mcp_servers()
-    secrets = servers["pdf_generator"].secrets
-    assert secrets == {
-        "DB_NAME": "test_db",
-        "DB_USER": "test_user",
-        "DB_PASSWORD": "test_pw",
-        "DB_HOST": "test-host",
-        "SECRET_KEY": "my-secret",
-    }
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_time_has_no_secrets():
-    """'time' server is local-only — no DB / no decryption ⇒ no secrets."""
-
-    servers = MCPServer.get_default_mcp_servers()
-    assert servers["time"].secrets is None or servers["time"].secrets == {}
-
-
-@override_settings(
-    DB_NAME="test_db",
-    DB_USER="test_user",
-    DB_PASSWORD="test_pw",
-    DB_HOST="test-host",
-)
-def test_get_default_mcp_servers_names():
-    servers = MCPServer.get_default_mcp_servers()
-    for name in ("cron_job", "time", "pdf_generator"):
-        assert servers[name].name == name
+    assert not hasattr(MCPServer, "get_default_mcp_servers")

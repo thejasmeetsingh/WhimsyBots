@@ -11,7 +11,6 @@ This module defines the core data models:
 
 import uuid
 
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MinValueValidator, URLValidator
@@ -221,53 +220,6 @@ class MCPServer(BaseModel):
         """Validate transport-specific fields."""
         validate_transport_fields(self.transport, self.command, self.endpoint)
         return super().clean()
-
-    @staticmethod
-    def get_default_mcp_servers() -> dict[str, "MCPServer"]:
-        """Create MCPServer (temp) objects for default MCP servers.
-
-        Returns:
-            dict[str, MCPServer]: MCPServer objects
-        """
-        cron_job_mcp = MCPServer(
-            name="cron_job",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "cron_job"],
-            secrets={
-                "DB_NAME": settings.DB_NAME,
-                "DB_USER": settings.DB_USER,
-                "DB_PASSWORD": settings.DB_PASSWORD,
-                "DB_HOST": settings.DB_HOST,
-            },
-        )
-
-        time_mcp = MCPServer(
-            name="time",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "mcp_server_time"],
-        )
-
-        pdf_generator = MCPServer(
-            name="pdf_generator",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "pdf_generator"],
-            secrets={
-                "DB_NAME": settings.DB_NAME,
-                "DB_USER": settings.DB_USER,
-                "DB_PASSWORD": settings.DB_PASSWORD,
-                "DB_HOST": settings.DB_HOST,
-                "SECRET_KEY": settings.SECRET_KEY,
-            },
-        )
-
-        return {
-            "cron_job": cron_job_mcp,
-            "time": time_mcp,
-            "pdf_generator": pdf_generator,
-        }
 
     def __str__(self):
         return self.name

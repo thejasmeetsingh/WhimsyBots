@@ -31,3 +31,11 @@ GENERAL_TASK_ERROR = "Error caught in '{func_name}' for bot '{bot_name}'\n\nERRO
 SUMMARY_PROCESS_SUCCESS = "Summary management completed for {bots_len} bot(s)"
 GENERATE_EMBEDDING_FAILED = "Embedding failed for {obj_type} with ID: '{obj_id}'\n\nERROR: {error}"
 UPDATE_OBSERVED_PATTERNS_SUCCESS = "Patterns updated successfully for bot '{bot_name}'"
+CRON_ACTION_SUCCESS = "## ✅ Cron Job {action} Successfully!"
+CRON_DOES_NOT_EXISTS = "No Cron Job exists with the provided id: `{id}`"
+PDF_GENERATION_SEND_SUCCESS = "PDF generated and sent to the user successfully ✅"
+EMPTY_WEB_SEARCH = "No results found for query: `{query}`"
+WEBPAGE_CONTENT_ERROR = (
+    "Fetched {url} successfully, but couldn't extract readable article content "
+    "(page may be JS-rendered, a PDF, or non-article content)."
+)

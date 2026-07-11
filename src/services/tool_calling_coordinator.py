@@ -6,39 +6,86 @@ from typing import Any, Optional
 from app.choices import MessageRole
 from app.models import Ollama
 from clients import OllamaClient
+from clients.telegram import TelegramClient
+from mcp_tools.tools import (
+    CRON_JOB_TOOLS,
+    FUNCTION_NAME_TO_CALLABLE_MAP,
+    PDF_GENERATOR_TOOLS,
+    WEB_SEARCH_TOOLS,
+)
 from services.tool_executor import MCPToolConfig, ToolExecutor
 
 logger = logging.getLogger(__name__)
 
 
 def run_tool_calling_loop(
+    bot_id: str,
     ollama_client: OllamaClient,
     model: str,
     history: list[dict[str, Any]],
     tools_config: list[MCPToolConfig],
     ollama: Ollama,
+    telegram_client: TelegramClient,
     add_keep_alive: bool = False,
+    exclude_crons: bool = False,
 ) -> tuple[str, Optional[int]]:
-    """Execute the tool calling loop with Ollama and MCP tools.
+    """Run a multi-turn Ollama chat loop that resolves tool calls.
+
+    Drives the model in a 'while True' loop: each iteration sends the
+    current 'history' (with the configured 'tools' schema) to Ollama and
+    exits when the response no longer contains a 'tools' field. While the
+    model keeps requesting tools, each tool call is dispatched either to
+    a built-in 'mcp_tools' callable (cron job, web search, PDF generator)
+    or to a remote/local MCP server via 'ToolExecutor'. Results are
+    appended back into 'history' so the next iteration sees them.
+
+    The 'tools' list sent to Ollama is composed of:
+    1. The bot's MCP server tools ('tools_config').
+    2. The always-on 'WEB_SEARCH_TOOLS' and 'PDF_GENERATOR_TOOLS'.
+    3. 'CRON_JOB_TOOLS', unless 'exclude_crons=True' (e.g. when the
+       loop is itself triggered by a cron job, to prevent recursion).
 
     Args:
-        ollama_client: Configured OllamaClient instance
-        model: Model name to use for chat
-        history: Message history list with role and content
-        tools_config: List of tool configurations from MCPToolsBuilder
-        ollama: Ollama configuration with temperature, num_ctx, num_predict
-        add_keep_alive: A flag param to indetify when to pass the keep_alive param
-        format (Optional): A strucutred format of the response
+        bot_id: UUID of the bot driving the conversation. Forwarded to
+            default tools that need it (cron job management).
+        ollama_client: Configured 'OllamaClient' used to call Ollama.
+        model: Name of the Ollama model to chat with.
+        history: Mutable message history in Ollama/OpenAI format
+            ('role', 'content'). Updated in place with assistant tool-call
+            messages and tool results as the loop progresses.
+        tools_config: Bot-specific MCP tool configurations produced by
+            'MCPToolsBuilder.build_tools_from_servers'.
+        ollama: 'Ollama' model row providing 'temperature', 'num_ctx',
+            'num_predict', and 'keep_alive' settings.
+        telegram_client: Active 'TelegramClient' required by the
+            'generate_and_send_report' default tool.
+        add_keep_alive: When True, pass 'ollama.keep_alive' to
+            'ollama_client.chat' so the model stays loaded between
+            requests. When False, omit it (model is unloaded
+            immediately after the call).
+        exclude_crons: When True, do not advertise the cron job
+            tools to the model. Used when this loop is itself executed
+            from within a cron job to avoid recursive scheduling.
 
     Returns:
-        Final response message from Ollama and total duration in milliseconds.
+        tuple[str, Optional[int]]: A 2-tuple of:
+            - The final assistant 'message' text from Ollama.
+            - The 'ollama_ms' duration of the last call in milliseconds,
+              or None if the upstream client did not report one.
 
     Raises:
-        Exception: If the tool calling loop fails
+        Exception: Re-raises any error from 'ollama_client.chat',
+            'ToolExecutor.execute_default_tool', or
+            'ToolExecutor.execute_tool_call_sync' after logging it.
+            Callers are expected to handle the failure and report a
+            user-facing error.
     """
     try:
         tool_executor = ToolExecutor(tools_config)
-        tools = [tool.tool for tool in tools_config]
+        tools = [tool.tool for tool in tools_config] + WEB_SEARCH_TOOLS + PDF_GENERATOR_TOOLS
+
+        if not exclude_crons:
+            tools += CRON_JOB_TOOLS
 
         # Tool calling loop
         while True:
@@ -70,7 +117,13 @@ def run_tool_calling_loop(
             # Execute each tool call
             for tool_call in response.get("tools", []):
                 tool_call_dict = tool_call["function"].model_dump()
-                result = tool_executor.execute_tool_call_sync(tool_call_dict)
+
+                if tool_call_dict.get("name", "") in FUNCTION_NAME_TO_CALLABLE_MAP:
+                    result = tool_executor.execute_default_tool(
+                        tool_call_dict, bot_id, telegram_client
+                    )
+                else:
+                    result = tool_executor.execute_tool_call_sync(tool_call_dict)
 
                 if result is not None:
                     history.append(

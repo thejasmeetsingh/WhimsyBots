@@ -167,16 +167,11 @@ src/
 │   ├── tool_calling_coordinator.py # Loops chat → tool_call → tool_result until the model is done
 │   └── tool_executor.py          # MCPToolConfig, MCPToolsBuilder, ToolExecutor
 │
-├── cron_job/                     # Standalone Cron Job MCP server (FastMCP)
-│   ├── server.py                 # @mcp.tool() registrations: list/create/update/delete
-│   ├── db.py                     # Async SQLAlchemy session
-│   ├── models.py                 # SQLAlchemy mirror of app.models.CronJob
-│   └── helpers.py                # Cron validation + formatting
-│
-├── pdf_generator/                # Standalone PDF Generator MCP server (FastMCP)
-│   ├── server.py                 # @mcp.tool() registration: generate_and_send_report
-│   ├── db.py                     # Async SQLAlchemy session
-│   └── helpers.py                # HTML extraction, PDF rendering (WeasyPrint), Telegram send
+├── mcp_tools/                    # In-process MCP tool registry (built-in defaults)
+│   ├── tools.py                  # FUNCTION_NAME_TO_CALLABLE_MAP + tool schemas
+│   ├── cron_job.py               # list / create / update / delete cron jobs (Django ORM)
+│   ├── pdf_generator.py          # HTML → PDF + Telegram delivery
+│   └── web_search.py             # DuckDuckGo search + page extraction
 │
 ├── utils/                        # Cross-cutting helpers
 │   ├── crypto.py                 # Fernet encryption, deterministic token hashing
@@ -184,20 +179,23 @@ src/
 │   ├── scheduling.py             # calculate_next_run_at (croniter wrapper)
 │   ├── tasks.py                  # Shared Celery helpers (lookups, log, embedding dispatch)
 │   ├── telegram.py               # parse_telegram_update
-│   └── text.py                   # split_message — Telegram 4096-char aware
+│   ├── text.py                   # split_message — Telegram 4096-char aware
+│   ├── cron_job.py               # calc_next_run, fmt_jobs, parse_uuid (used by mcp_tools.cron_job)
+│   └── pdf.py                    # extract_html, generate_pdf (WeasyPrint; used by mcp_tools.pdf_generator)
 │
 ├── tests/                        # Pytest suite (mirrors the src/ layout)
-│   ├── conftest.py               # Root fixtures: fake_redis, fake_redis_server, django_db_setup
+│   ├── conftest.py               # Root fixtures: fake_redis, fake_redis_server, django_db_setup,
+│   │                             # weasyprint stub
 │   ├── test_app/                 # admin, choices, fields, forms, models, tasks, validators
 │   ├── test_clients/             # mcp, ollama, telegram clients
-│   ├── test_cron_job/            # server, db, helpers
 │   ├── test_managers/            # ollama_config, telegram_client
-│   ├── test_pdf_generator/       # server, helpers
+│   ├── test_mcp_tools/           # mcp_tools registry, cron_job, pdf_generator, web_search
 │   ├── test_services/            # bot_processor, context_assembler, conversation_summary,
 │   │                             #   embedding, observed_patterns, rate_limiter,
 │   │                             #   telegram_update_handler, token_budget,
 │   │                             #   tool_calling_coordinator, tool_executor
-│   ├── test_utils/               # crypto, formatting, scheduling, telegram, text, tasks
+│   ├── test_utils/               # crypto, formatting, scheduling, telegram, text, tasks,
+│   │                             # cron_job, pdf
 │   └── test_whimsybots/          # views (TelegramWebhook)
 │
 ├── whimsybots/                   # Django project
@@ -238,9 +236,15 @@ External tool providers, attached per-bot via the admin:
 - **LOCAL** — spawned as a subprocess over stdio. Requires `command` (e.g. `python`, `npx`, `uv`) and `args`. Optional `secrets` become env vars.
 - **REMOTE** — connected over HTTPS. Requires `endpoint`. Optional `secrets` become HTTP headers.
 
-`MCPServer.get_default_mcp_servers()` returns the always-on servers — `cron_job`, `time`, and `pdf_generator` — appended to every bot's tool list at inference time.
+### Built-in default tools (`mcp_tools`)
 
-Three global servers ship **inside** the app and are invoked as `python -m cron_job`, `python -m pdf_generator`, and `python -m mcp_server_time`. They share the DB via SQLAlchemy + asyncpg.
+Three default tool groups ship **inside** the app and are always advertised to the LLM (except `CRON_JOB_TOOLS`, which is dropped during cron-driven runs to prevent recursion):
+
+- **CRON_JOB_TOOLS** — `list_cron_jobs`, `create_cron_job`, `update_cron_job`, `delete_cron_job`. Backed by the Django ORM directly.
+- **PDF_GENERATOR_TOOLS** — `generate_and_send_report`. WeasyPrint-based HTML → PDF, delivered to the active chat via the existing `TelegramClient`.
+- **WEB_SEARCH_TOOLS** — `web_search` (DuckDuckGo) and `fetch_and_extract` (page → markdown via trafilatura).
+
+The mapping from function name to callable lives in `mcp_tools.tools.FUNCTION_NAME_TO_CALLABLE_MAP`; the loop's `run_tool_calling_loop` accepts `bot_id` (forwarded to cron tools), `telegram_client` (forwarded to the PDF tool), and `exclude_crons` (drop the cron group) to give the dispatcher enough context. Bot-specific MCP servers still go through the full remote/local MCP transport — the refactor only collapsed the built-in defaults.
 
 ### Embeddings
 Every user `Message` and every `CronJob` carries a vector embedding, generated from Ollama on save. `EmbeddingService` centralises the dispatch (see [`generate_embedding` task](#6-celery-tasks-reference)). Embeddings power:
@@ -324,13 +328,17 @@ Always wrap a task body in `try / except` so unexpected exceptions hit the retry
 
 ### 8.2 Add a bot-scoped MCP server
 
-End users add these via the admin; for code-level integration (e.g. a new default server):
+End users add these via the admin; for code-level integration (a new bot-specific default):
 
-1. Add a new entry to `MCPServer.get_default_mcp_servers()` in `app/models.py`.
-2. If the server lives **inside** the repo, create a new top-level module next to `cron_job/` and `pdf_generator/` (FastMCP + `python -m <module>`).
-3. Make sure the secrets dict carries DB credentials / `SECRET_KEY` when the server needs to decrypt bot tokens.
-4. Update `prompts.DEFAULT_SYSTEM_PROMPT` if the LLM should know about the new tool category.
-5. Add tests under `src/tests/test_<server>/`.
+1. Add the `MCPServer` row via the admin.
+2. The loop discovers it via `MCPToolsBuilder.build_tools_from_servers(bot_id, mcp_servers)` on every cycle.
+3. If you want to ship a (alongside `CRON_JOB_TOOLS` etc.):
+   1. Create a module under `src/mcp_tools/` and expose plain callables (no MCP transport required).
+   2. Add the function → callable mapping to `FUNCTION_NAME_TO_CALLABLE_MAP` in `mcp_tools/tools.py`.
+   3. Declare the OpenAI-compatible tool specs as a new `*_TOOLS` list in `mcp_tools/tools.py`.
+   4. Append the new group in `services.bot_processor.process_message` and `services.tool_calling_coordinator.run_tool_calling_loop`.
+   5. Update `prompts.DEFAULT_SYSTEM_PROMPT` if the LLM should be told about the new category.
+   6. Add tests under `src/tests/test_mcp_tools/`.
 
 ### 8.3 Add a Celery task
 
@@ -398,7 +406,6 @@ make test                    # → pytest src/tests/
 
 # Verbose / coverage / single
 make test-verbose            # → pytest src/tests/ -v
-make test-coverage           # → pytest src/tests/ --cov
 make test-specific FILE=test_app/test_models.py::TestBot::test_str
 ```
 

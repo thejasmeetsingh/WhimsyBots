@@ -1,19 +1,29 @@
 """Tests for 'src/services/tool_executor.py'.
 
-Three units are tested:
+Four units are tested:
   — 'MCPToolConfig.get_transport' — URL/command presence decides transport.
-  — 'MCPToolsBuilder' — config & transport selection, async build path.
-  — 'ToolExecutor' — find-by-name, execute (async + sync), error mapping.
+  — 'MCPToolsBuilder' — config & transport selection, async build path,
+    Redis-backed per-server cache.
+  — 'ToolExecutor.find_tool_by_call' / 'execute_tool' / 'execute_tool_call_sync'
+    — find-by-name, async execute, sync wrapper, error mapping.
+  — 'ToolExecutor.execute_default_tool' — in-process mcp_tools dispatch.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from django.core.cache import cache
 
 from app.choices import MCPTransportType
+from mcp_tools.tools import (
+    FETCH_AND_EXTRACT,
+    FUNCTION_NAME_TO_CALLABLE_MAP,
+    GENERATE_PDF,
+    WEB_SEARCH,
+)
 from services.tool_executor import (
     MCPToolConfig,
     MCPToolsBuilder,
@@ -29,6 +39,7 @@ from strings import INVALID_TOOL, TOOL_EXECUTION_FAILED
 def _server(
     *,
     name: str = "srv",
+    id: str = "srv-1",
     transport: str = MCPTransportType.LOCAL.value[0],
     command: str | None = "python",
     args: list | None = None,
@@ -36,6 +47,7 @@ def _server(
     secrets: dict | None = None,
 ):
     return SimpleNamespace(
+        id=id,
         name=name,
         transport=transport,
         command=command,
@@ -72,7 +84,6 @@ def test_get_transport_returns_local_when_no_url():
 
 
 def test_get_transport_returns_local_when_url_empty_string():
-    # Empty string is falsy ⇒ treat as "no url" ⇒ local transport.
     cfg = MCPToolConfig(tool=_tool(), config={"url": ""}, transport_type="X")
     assert cfg.get_transport() == MCPTransportType.LOCAL.value[0]
 
@@ -112,8 +123,6 @@ def test_build_server_config_remote_shape():
 
 
 def test_build_server_config_local_drops_endpoint():
-    # If a LOCAL server somehow carries an endpoint, the builder must
-    # ignore it (only the LOCAL-shape fields make it into the config).
     server = _server(
         transport=MCPTransportType.LOCAL.value[0],
         command="python",
@@ -140,16 +149,27 @@ def test_get_transport_type_returns_server_transport():
 # ──────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """The Redis-backed cache (LocMemCache in tests) must be cleared
+    between tests so cached tool lists from one test do not leak.
+    """
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.mark.asyncio
 async def test_build_tools_from_servers_returns_configs():
     server = _server()
     tool_list = [_tool("alpha"), _tool("beta")]
 
     with patch("services.tool_executor.mcp_client", AsyncMock(return_value=tool_list)):
-        configs = await MCPToolsBuilder.build_tools_from_servers([server])
+        configs = await MCPToolsBuilder.build_tools_from_servers(
+            bot_id="bot-1", mcp_servers=[server]
+        )
 
     assert len(configs) == 2
-    # Every config carries the same shared transport + config from the server.
     for cfg in configs:
         assert cfg.transport_type == MCPTransportType.LOCAL.value[0]
         assert cfg.config == MCPToolsBuilder._build_server_config(server)
@@ -160,8 +180,8 @@ async def test_build_tools_from_servers_skips_failed_servers(caplog):
     import logging
 
     # Distinct commands so the fake_client can tell the servers apart.
-    server_ok = _server(name="ok", command="ok-cmd")
-    server_bad = _server(name="bad", command="bad-cmd")
+    server_ok = _server(name="ok", id="ok", command="ok-cmd")
+    server_bad = _server(name="bad", id="bad", command="bad-cmd")
     tool_list = [_tool("only")]
 
     async def fake_client(transport, config):
@@ -173,7 +193,9 @@ async def test_build_tools_from_servers_skips_failed_servers(caplog):
         patch("services.tool_executor.mcp_client", side_effect=fake_client),
         caplog.at_level(logging.ERROR, logger="services.tool_executor"),
     ):
-        configs = await MCPToolsBuilder.build_tools_from_servers([server_ok, server_bad])
+        configs = await MCPToolsBuilder.build_tools_from_servers(
+            bot_id="bot-1", mcp_servers=[server_ok, server_bad]
+        )
 
     # Only the working server contributed tools.
     assert len(configs) == 1
@@ -183,23 +205,73 @@ async def test_build_tools_from_servers_skips_failed_servers(caplog):
 
 @pytest.mark.asyncio
 async def test_build_tools_from_servers_empty_input_returns_empty():
-    configs = await MCPToolsBuilder.build_tools_from_servers([])
+    configs = await MCPToolsBuilder.build_tools_from_servers(bot_id="bot-1", mcp_servers=[])
     assert configs == []
 
 
 @pytest.mark.asyncio
 async def test_build_tools_from_servers_concatenates_across_servers():
-    server_a = _server(name="a", command="a-cmd")
-    server_b = _server(name="b", command="b-cmd")
+    server_a = _server(name="a", id="a", command="a-cmd")
+    server_b = _server(name="b", id="b", command="b-cmd")
 
     async def fake_client(transport, config):
         return [_tool(f"{config['command']}_tool")]
 
     with patch("services.tool_executor.mcp_client", side_effect=fake_client):
-        configs = await MCPToolsBuilder.build_tools_from_servers([server_a, server_b])
+        configs = await MCPToolsBuilder.build_tools_from_servers(
+            bot_id="bot-1", mcp_servers=[server_a, server_b]
+        )
 
     tool_names = sorted(c.tool["function"]["name"] for c in configs)
     assert tool_names == ["a-cmd_tool", "b-cmd_tool"]
+
+
+@pytest.mark.asyncio
+async def test_build_tools_from_servers_uses_redis_cache():
+    """The tool list is cached per (bot_id, server_id) so repeat
+    calls don't re-query the MCP server.
+    """
+    server = _server()
+    tool_list = [_tool("cached_tool")]
+
+    with patch(
+        "services.tool_executor.mcp_client",
+        AsyncMock(return_value=tool_list),
+    ) as mcp_client_mock:
+        # First call: hits the MCP client.
+        configs_first = await MCPToolsBuilder.build_tools_from_servers(
+            bot_id="bot-1", mcp_servers=[server]
+        )
+        # Second call: should be served from the cache, NOT the client.
+        configs_second = await MCPToolsBuilder.build_tools_from_servers(
+            bot_id="bot-1", mcp_servers=[server]
+        )
+
+    # The MCP client is queried only once across the two calls.
+    assert mcp_client_mock.call_count == 1
+    assert len(configs_first) == 1
+    assert len(configs_second) == 1
+    # The cached tool carries the same payload (Django's LocMemCache
+    # serialises on set/get, so identity is not preserved across the
+    # boundary, but the values match exactly).
+    assert configs_first[0].model_dump() == configs_second[0].model_dump()
+
+
+@pytest.mark.asyncio
+async def test_build_tools_from_servers_cache_keyed_per_bot():
+    """Two bots pointing at the same MCP server get independent caches."""
+    server = _server()
+    tool_list = [_tool("shared")]
+
+    with patch(
+        "services.tool_executor.mcp_client",
+        AsyncMock(return_value=tool_list),
+    ) as mcp_client_mock:
+        await MCPToolsBuilder.build_tools_from_servers(bot_id="bot-A", mcp_servers=[server])
+        await MCPToolsBuilder.build_tools_from_servers(bot_id="bot-B", mcp_servers=[server])
+
+    # Both bots had to query the MCP client because their cache keys differ.
+    assert mcp_client_mock.call_count == 2
 
 
 # ──────────────────────────────────────────────
@@ -225,8 +297,6 @@ def test_find_tool_by_call_handles_missing_name():
 
 
 def test_find_tool_by_call_returns_first_match_when_duplicates():
-    # If two configs expose the same tool name, return the first — that's
-    # an undefined behaviour boundary, but we pin the implementation.
     cfg1 = MCPToolConfig(tool=_tool("dup"), config={"a": 1}, transport_type="L")
     cfg2 = MCPToolConfig(tool=_tool("dup"), config={"a": 2}, transport_type="L")
     executor = ToolExecutor([cfg1, cfg2])
@@ -282,7 +352,6 @@ async def test_execute_tool_skips_empty_text_entries():
     }
     with patch("services.tool_executor.mcp_client", AsyncMock(return_value=response)):
         result = await ToolExecutor([cfg]).execute_tool(cfg)
-    # Empty-text entries are dropped — we only join non-empty parts.
     assert "kept" in result
     assert "also-kept" in result
 
@@ -313,8 +382,6 @@ def test_execute_tool_call_sync_returns_tool_result_on_success():
     cfg = MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")
     executor = ToolExecutor([cfg])
 
-    # Patch 'asyncio.run' because 'execute_tool_call_sync' is sync but
-    # calls an async method internally.
     with patch(
         "services.tool_executor.asyncio.run",
         return_value="hello",
@@ -328,9 +395,6 @@ def test_execute_tool_call_sync_returns_failed_marker_on_exception():
     cfg = MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")
     executor = ToolExecutor([cfg])
 
-    # When the async call raises, we return the failure marker rather
-    # than letting the exception bubble up — the caller treats it as a
-    # tool result string and lets the LLM respond.
     with patch(
         "services.tool_executor.asyncio.run",
         side_effect=RuntimeError("boom"),
@@ -342,9 +406,137 @@ def test_execute_tool_call_sync_returns_failed_marker_on_exception():
 
 def test_execute_tool_call_sync_handles_missing_name_gracefully():
     executor = ToolExecutor([])
-    # Tool name missing → can't find → return INVALID_TOOL with "None".
     result = executor.execute_tool_call_sync({})
     assert INVALID_TOOL.format(tool=None) in result or INVALID_TOOL.format(tool="None") in result
+
+
+# ──────────────────────────────────────────────
+# ToolExecutor.execute_default_tool
+# ──────────────────────────────────────────────
+
+
+def _default_executor():
+    return ToolExecutor([MCPToolConfig(tool=_tool("foo"), config={}, transport_type="L")])
+
+
+def test_execute_default_tool_returns_invalid_tool_when_unknown():
+    executor = _default_executor()
+    result = executor.execute_default_tool({"name": "not_a_real_tool", "arguments": {}})
+    assert result == INVALID_TOOL.format(tool="not_a_real_tool")
+
+
+def test_execute_default_tool_invokes_mapped_callable():
+    """When the tool name is in FUNCTION_NAME_TO_CALLABLE_MAP the
+    underlying callable is invoked with the supplied arguments.
+    """
+    name = next(iter(FUNCTION_NAME_TO_CALLABLE_MAP))
+    captured = {}
+
+    def fake(**kwargs):
+        captured["kwargs"] = kwargs
+        return "result-text"
+
+    with patch.dict(FUNCTION_NAME_TO_CALLABLE_MAP, {name: fake}, clear=False):
+        executor = _default_executor()
+        result = executor.execute_default_tool(
+            {"name": name, "arguments": {"x": 1}}, bot_id="bot-1"
+        )
+
+    assert result == "result-text"
+    assert captured["kwargs"]["x"] == 1
+
+
+def test_execute_default_tool_injects_bot_id_for_cron_tools():
+    """The cron job tools have 'bot_id' injected before the call."""
+    # Pick a cron tool that requires bot_id (any non-web/non-PDF tool).
+    cron_tool_name = "list_cron_jobs"
+    captured = {}
+
+    def fake(bot_id, **kwargs):
+        captured["bot_id"] = bot_id
+        captured["kwargs"] = kwargs
+        return "ok"
+
+    with patch.dict(FUNCTION_NAME_TO_CALLABLE_MAP, {cron_tool_name: fake}, clear=False):
+        executor = _default_executor()
+        executor.execute_default_tool(
+            {"name": cron_tool_name, "arguments": {"is_active": True}},
+            bot_id="bot-uuid",
+        )
+
+    assert captured["bot_id"] == "bot-uuid"
+    assert captured["kwargs"]["is_active"] is True
+
+
+def test_execute_default_tool_injects_telegram_client_for_pdf_tool():
+    """The PDF generator tool receives the live TelegramClient."""
+    captured = {}
+
+    def fake(client, **kwargs):
+        captured["client"] = client
+        captured["kwargs"] = kwargs
+        return "ok"
+
+    with patch.dict(FUNCTION_NAME_TO_CALLABLE_MAP, {GENERATE_PDF: fake}, clear=False):
+        executor = _default_executor()
+        tg = MagicMock(name="TelegramClient")
+        executor.execute_default_tool(
+            {"name": GENERATE_PDF, "arguments": {"contents": "<html></html>"}},
+            telegram_client=tg,
+        )
+
+    assert captured["client"] is tg
+    assert captured["kwargs"]["contents"] == "<html></html>"
+
+
+def test_execute_default_tool_does_not_inject_for_web_search():
+    """'web_search' and 'fetch_and_extract' take no injected context."""
+    for name in (WEB_SEARCH, FETCH_AND_EXTRACT):
+        captured = {}
+
+        def fake(**kwargs):
+            captured["kwargs"] = kwargs
+            return "search-result"
+
+        with patch.dict(FUNCTION_NAME_TO_CALLABLE_MAP, {name: fake}, clear=False):
+            executor = _default_executor()
+            executor.execute_default_tool(
+                {"name": name, "arguments": {"query": "hi"}},
+                bot_id="bot-1",
+                telegram_client=MagicMock(),
+            )
+
+        # The callable was called without bot_id or telegram_client.
+        assert "bot_id" not in captured["kwargs"]
+        assert "client" not in captured["kwargs"]
+
+
+def test_execute_default_tool_returns_failed_marker_on_exception():
+    name = next(iter(FUNCTION_NAME_TO_CALLABLE_MAP))
+
+    def fake(**kwargs):
+        raise RuntimeError("callable boom")
+
+    with patch.dict(FUNCTION_NAME_TO_CALLABLE_MAP, {name: fake}, clear=False):
+        executor = _default_executor()
+        result = executor.execute_default_tool({"name": name, "arguments": {}}, bot_id="bot-1")
+
+    assert result.startswith(TOOL_EXECUTION_FAILED)
+    assert "callable boom" in result
+
+
+def test_execute_default_tool_returns_none_when_callable_returns_none():
+    """If the underlying callable returns None, the executor returns None."""
+    name = next(iter(FUNCTION_NAME_TO_CALLABLE_MAP))
+
+    def fake(**kwargs):
+        return None
+
+    with patch.dict(FUNCTION_NAME_TO_CALLABLE_MAP, {name: fake}, clear=False):
+        executor = _default_executor()
+        result = executor.execute_default_tool({"name": name, "arguments": {}}, bot_id="bot-1")
+
+    assert result is None
 
 
 # ──────────────────────────────────────────────
@@ -359,8 +551,6 @@ def test_tool_executor_stores_tools():
 
 
 def test_tool_executor_with_empty_list_is_valid():
-    # An executor with no tools must still be constructable and short-
-    # circuit cleanly on any tool call.
     executor = ToolExecutor([])
     assert executor.find_tool_by_call({"name": "any"}) is None
     assert executor.execute_tool_call_sync({"name": "any"}) == INVALID_TOOL.format(tool="any")

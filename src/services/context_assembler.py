@@ -16,7 +16,7 @@ the system prompt), with oldest messages dropped first when budget is tight.
 import logging
 from typing import Any, Optional
 
-from django.conf import settings
+from django.utils import timezone
 from pydantic import BaseModel
 
 from app.choices import MessageRole
@@ -89,9 +89,8 @@ class ContextAssembler:
         # System prompt — truncate from bottom (preserve the opening intent)
         raw_system_prompt = DEFAULT_SYSTEM_PROMPT.format(
             system_prompt=self.bot.system_prompt or "You are a helpful assistant",
+            current_dt=timezone.now().isoformat(),
             summary=summary_msg,
-            bot_id=str(self.bot.id),
-            timezone=settings.TIME_ZONE,
         )
 
         fitted_system_prompt = TokenBudgetService.truncate_text(

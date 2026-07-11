@@ -1,24 +1,12 @@
 """Helper utilities for cron job management."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from croniter import croniter
+from django.utils import timezone
 
-from cron_job.models import CronJob
-
-
-def validate_cron(expr: str) -> None:
-    """Validate a cron expression.
-
-    Args:
-        expr (str): The cron expression to validate.
-
-    Raises:
-        ValueError: If the expression is not a valid 5-field cron string.
-    """
-    if not croniter.is_valid(expr):
-        raise ValueError(f"Invalid cron expression: '{expr}'")
+from app.models import CronJob
 
 
 def calc_next_run(expr: str) -> datetime:
@@ -30,7 +18,7 @@ def calc_next_run(expr: str) -> datetime:
     Returns:
         datetime: The next occurrence of the schedule in UTC.
     """
-    return croniter(expr, datetime.now(timezone.utc)).get_next(datetime)
+    return croniter(expr, timezone.now()).get_next(datetime)
 
 
 def parse_uuid(value: str, label: str) -> uuid.UUID | str:
@@ -60,8 +48,8 @@ def fmt_job(job: CronJob) -> str:
         str: Markdown formatted string with job details.
     """
     return (
-        f"- **ID**: `{job.id}`\n"
-        f"  - **Bot ID**: `{job.bot_id}`\n"
+        f"- **ID**: `{str(job.id)}`\n"
+        f"  - **Bot ID**: `{str(job.bot_id)}`\n"
         f"  - **Name**: {job.name}\n"
         f"  - **Description**: {job.description}\n"
         f"  - **Cron Expression**: `{job.cron_expression}`"

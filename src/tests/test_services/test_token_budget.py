@@ -265,21 +265,18 @@ def test_fit_embeddings_empty_returns_empty():
 # ──────────────────────────────────────────────
 # truncate_tool_response
 # ──────────────────────────────────────────────
+#
+# 'truncate_tool_response' was removed when the 'tool_response' budget
+# tier was retired — there is no downstream consumer that reads
+# 'tool_response_chars' and 'truncate_tool_response' is no longer
+# referenced. If/when tool-response truncation is reintroduced,
+# restore these tests in tandem with the new tier.
+# ──────────────────────────────────────────────
 
 
-def test_truncate_tool_response_returns_input_when_under_budget():
-    assert TokenBudgetService.truncate_tool_response("hello", 100) == "hello"
-
-
-def test_truncate_tool_response_truncates_with_note():
-    result = TokenBudgetService.truncate_tool_response("x" * 500, char_budget=100)
-    assert len(result) <= 100
-    assert "truncated" in result.lower()
-
-
-def test_truncate_tool_response_truncates_to_exact_budget():
-    result = TokenBudgetService.truncate_tool_response("x" * 1000, char_budget=200)
-    assert len(result) == 200
+def test_truncate_tool_response_was_removed():
+    """The legacy 'truncate_tool_response' helper is no longer present."""
+    assert not hasattr(TokenBudgetService, "truncate_tool_response")
 
 
 # ──────────────────────────────────────────────
@@ -370,7 +367,6 @@ def test_token_budget_can_be_constructed_with_required_fields():
         recommended_tool_count=0,
         history_tokens=1000,
         embedding_chars=500,
-        tool_response_chars=500,
         system_prompt_chars=200,
         patterns_chars=100,
         summary_chars=100,
@@ -392,7 +388,6 @@ def test_token_budget_log_summary_does_not_raise(caplog):
         recommended_tool_count=0,
         history_tokens=1000,
         embedding_chars=500,
-        tool_response_chars=500,
         system_prompt_chars=200,
         patterns_chars=100,
         summary_chars=100,

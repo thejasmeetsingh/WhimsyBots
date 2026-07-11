@@ -105,7 +105,6 @@ def test_process_creates_new_summary_message_when_none_exists():
         recommended_tool_count=0,
         history_tokens=1,
         embedding_chars=0,
-        tool_response_chars=0,
         system_prompt_chars=0,
         patterns_chars=0,
         summary_chars=1000,
@@ -120,10 +119,6 @@ def test_process_creates_new_summary_message_when_none_exists():
     svc = ConversationSummaryService(bot, _ollama(), client)
 
     with (
-        patch(
-            "services.conversation_summary.MCPServer.get_default_mcp_servers",
-            return_value={},
-        ),
         patch(
             "services.conversation_summary.MCPToolsBuilder.build_tools_from_servers",
             return_value=[],
@@ -166,7 +161,6 @@ def test_process_updates_existing_summary_when_present():
         recommended_tool_count=0,
         history_tokens=1,
         embedding_chars=0,
-        tool_response_chars=0,
         system_prompt_chars=0,
         patterns_chars=0,
         summary_chars=1000,
@@ -176,10 +170,6 @@ def test_process_updates_existing_summary_when_present():
     svc = ConversationSummaryService(bot, _ollama(), client)
 
     with (
-        patch(
-            "services.conversation_summary.MCPServer.get_default_mcp_servers",
-            return_value={},
-        ),
         patch(
             "services.conversation_summary.MCPToolsBuilder.build_tools_from_servers",
             return_value=[],

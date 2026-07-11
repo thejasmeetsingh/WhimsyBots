@@ -49,9 +49,11 @@ Celery Beat (every minute)
       → Fetches CronJob instance (name, description, schedule_embedding)
       → BotMessageProcessor.process_cron_job(cron_job):
           → _get_tools_config() re-ranks bot MCPServers by schedule_embedding
-            cosine distance, excludes "cron_job" server, adds default servers
+            cosine distance
           → Trims to context.budget.recommended_tool_count
-          → Runs Ollama tool_calling_loop with CRON_JOB_PROMPT
+          → Runs Ollama tool_calling_loop with CRON_JOB_PROMPT and
+            exclude_crons=True so the loop does NOT advertise the cron
+            tool group (prevents recursive scheduling)
           → LLM executes task with tool access
       → Response sent to user via TelegramClient.send_message()
       → Updates CronJob.next_run_at and last_run_at
@@ -70,24 +72,17 @@ User sends message via Telegram
   → process_inbound_message task:
       → BotMessageProcessor.process_message():
           → _get_tools_config() re-ranks bot MCPServers by message
-            content_embedding (cosine distance), adds default servers
-            (time, cron_job, pdf_generator)
+            content_embedding (cosine distance)
           → ContextAssembler.assemble() builds system prompt:
-              [system prompt + observed patterns + relevant memories] +
+              [system prompt + observed patterns + relevant memories] + 
               [top-k relevant memories from pgvector] + history
           → Trims to context.budget.recommended_tool_count
           → Runs Ollama tool_calling_loop with tool calling format
-          → LLM can call any available MCP tools including pdf_generator
-          → Returns: response string (intent detection is implicit in
-            tool usage)
-      → Stores response to DB (role=ASSISTANT)
-      → Sends response via TelegramClient.send_message()
-```
-
----
-
-## 3. Django App Structure
-
+          → The advertised tool list concatenates the bot's MCP tools
+            with the three default groups exposed by 'mcp_tools':
+            WEB_SEARCH_TOOLS, PDF_GENERATOR_TOOLS, and CRON_JOB_TOOLS
+          → LLM can call any available tool — default tools are
+            dispatched as in-process callables via ToolExecutor
 ```text
 WhimsyBots/
   src/
@@ -135,20 +130,16 @@ WhimsyBots/
       ollama.py              ← Ollama LLM client (chat + embeddings)
       mcp.py                 ← Model Context Protocol client
 
-    cron_job/                ← Standalone Cron Job MCP Server (FastMCP)
+    mcp_tools/               ← In-process MCP tool registry
       __init__.py
-      __main__.py            ← Entry point (python -m cron_job)
-      server.py              ← MCP server definition with tools
-      db.py                  ← Async database session management
-      models.py              ← SQLAlchemy models (mirrors app.models.CronJob)
-      helpers.py             ← Cron parsing, validation
-
-    pdf_generator/           ← Standalone PDF Generator MCP Server (FastMCP)
-      __init__.py
-      __main__.py            ← Entry point (python -m pdf_generator)
-      server.py              ← MCP server definition with PDF tools
-      db.py                  ← Async database session management
-      helpers.py             ← HTML parsing, PDF rendering
+      tools.py               ← FUNCTION_NAME_TO_CALLABLE_MAP + OpenAI-compatible
+                               tool schemas (CRON_JOB_TOOLS, WEB_SEARCH_TOOLS,
+                               PDF_GENERATOR_TOOLS)
+      cron_job.py            ← Cron job management tools (list / create / update / delete)
+                               backed by the Django ORM
+      pdf_generator.py       ← PDF generation + Telegram delivery tool
+      web_search.py          ← DuckDuckGo search + page extraction tool (DuckDuckGo +
+                               trafilatura)
 
     utils/                   ← Cross-cutting helpers (extracted from app/utils.py)
       __init__.py
@@ -161,21 +152,23 @@ WhimsyBots/
                                generate_mcp_embedding, log_task_failure, etc.)
       telegram.py            ← Telegram response sanitization helpers
       text.py                ← Message splitting (>4096 char), sanitization
+      cron_job.py            ← Pure cron helpers (calc_next_run, fmt_jobs, parse_uuid)
+      pdf.py                 ← HTML → PDF helpers (extract_html, generate_pdf)
 
     static/                  ← Static files (admin, martor, plugins)
 
-  tests/                     ← Comprehensive pytest suite (NEW)
-    conftest.py              ← Root pytest fixtures (DB, fakeredis, etc.)
+  tests/                     ← Comprehensive pytest suite
+    conftest.py              ← Root pytest fixtures (DB, fakeredis, weasyprint stub, etc.)
     test_app/                ← tests for app/ (choices, fields, validators, models, admin, forms, tasks)
     test_clients/            ← tests for clients/ (telegram, ollama, mcp)
-    test_cron_job/           ← tests for cron_job/ (server, db, helpers)
     test_managers/           ← tests for managers/ (telegram_client, ollama_config)
-    test_pdf_generator/      ← tests for pdf_generator/ (server, helpers)
+    test_mcp_tools/          ← tests for mcp_tools/ (tools registry, cron_job, pdf_generator, web_search)
     test_services/           ← tests for services/ (bot_processor, context_assembler,
                               embedding, observed_patterns, telegram_update_handler,
                               tool_calling_coordinator, tool_executor,
                               conversation_summary, rate_limiter, token_budget)
-    test_utils/              ← tests for utils/ (crypto, formatting, scheduling, telegram, text, tasks)
+    test_utils/              ← tests for utils/ (crypto, formatting, scheduling, telegram, text,
+                              tasks, cron_job, pdf)
     test_whimsybots/         ← tests for project-level modules (views)
 
   manage.py
@@ -188,13 +181,13 @@ WhimsyBots/
                               pytest-asyncio, fakeredis, pgvector)
   docker-compose.yml
   Dockerfile
-  Makefile                   ← Added test, test-verbose, test-coverage, test-specific
+  Makefile                   ← Added test, test-verbose, test-specific
                               targets; env, dev-setup, install-deps, build-test
   gunicorn.conf.py           ← Gunicorn WSGI server configuration
 
 .github/
   workflows/
-    master.yml               ← CI: runs pytest on PR/push to master (NEW)
+    master.yml               ← CI: runs pytest on PR/push to master
 ```
 
 ---
@@ -436,12 +429,11 @@ def process_cron_job(self, job_id: str) -> None:
     # 1. Fetch CronJob by ID
     # 2. Validate Ollama configuration
     # 3. BotMessageProcessor.process_cron_job(cron_job):
-    #    - _get_tools_config(
-    #          query_vector=cron_job.schedule_embedding,
-    #          servers_to_exclude={"cron_job"}
-    #      )
+    #    - _get_tools_config(query_vector=cron_job.schedule_embedding)
     #    - Runs tool_calling_loop with CRON_JOB_PROMPT
-    #    - LLM executes the task
+    #      and exclude_crons=True so the cron job tool group is NOT
+    #      advertised to the model (prevents recursive scheduling).
+    #    - LLM executes the task using the remaining tools.
     # 4. Send response via Telegram
     # 5. Update CronJob.next_run_at (via croniter) and last_run_at
 ```
@@ -584,10 +576,10 @@ Celery Beat (every minute)
   → process_cron_job task:
       → Fetch CronJob (carries schedule_embedding for tool ranking)
       → BotMessageProcessor.process_cron_job(cron_job):
-          → _get_tools_config(query_vector=schedule_embedding,
-                              servers_to_exclude={"cron_job"})
-          → Runs tool_calling_loop with CRON_JOB_PROMPT
-          → LLM executes task with access to tools
+          → _get_tools_config(query_vector=schedule_embedding)
+          → Runs tool_calling_loop with CRON_JOB_PROMPT and
+            exclude_crons=True so cron tools are NOT advertised
+          → LLM executes task with access to the remaining tools
       → Response sent via Telegram
       → Updates CronJob.next_run_at and last_run_at
 ```
@@ -614,7 +606,7 @@ Instead of returning structured `{intent, response}`, the LLM now:
 - User: "What time is it?" → LLM calls `time.get_current_time()` tool
 - User: "Just chat with me" → LLM provides response without calling tools
 
-### 7.2 Semantic Tool Ranking (NEW)
+### 7.2 Semantic Tool Ranking
 
 `BotMessageProcessor._get_tools_config()` is a single helper used by both `process_message` and `process_cron_job`. It accepts an optional `query_vector` and ranks the bot's active `MCPServer` records by **cosine distance** of their `tools_description_embedding` to the query vector:
 
@@ -622,7 +614,6 @@ Instead of returning structured `{intent, response}`, the LLM now:
 def _get_tools_config(
     self,
     query_vector: Optional[list[float]] = None,
-    servers_to_exclude: Optional[set[str]] = None,
 ) -> list[MCPToolConfig]:
     mcp_servers = MCPServer.objects.filter(bot_id=self.bot.id, is_active=True)
 
@@ -631,22 +622,28 @@ def _get_tools_config(
             distance=CosineDistance("tools_description_embedding", query_vector)
         ).order_by("distance")
 
-    # Append default servers (time, cron_job, pdf_generator)
-    # Filter out excluded servers (e.g. {"cron_job"} for cron-driven runs)
-    # Discover tools via MCPToolsBuilder
+    # Discover tools via MCPToolsBuilder (bot_id is forwarded so the
+    # per-(bot, server) Redis cache stays scoped correctly).
     ...
 ```
 
-After ranking, the list is trimmed to `context.budget.recommended_tool_count` so the LLM is only offered tools that fit in the configured `num_ctx`.
+After ranking, the list is trimmed to `context.budget.recommended_tool_count` so the LLM is only offered tools that fit in the configured `num_ctx`. The default tools (cron, PDF, web search) are *not* part of this list — they are appended directly to the `tool_definitions` passed into `ContextAssembler` and the tool-calling loop, see [§ 7.3](#73-default-tools-via-mcp_tools).
 
-### 7.3 Available Tools
+### 7.3 Default Tools via `mcp_tools`
 
-Every message processing includes:
+The functionality ships an **in-process tool registry** under [`src/mcp_tools/`](src/mcp_tools/) — three default tool groups are always advertised to the LLM:
 
-- **time** MCP server — Get current time and timezone info
-- **cron_job** MCP server — Manage scheduled tasks (excluded from cron job runs)
-- **pdf_generator** MCP server — Generate PDF reports
-- **Custom MCPServers** — Any bot-specific servers configured in admin
+| Group | Function names | Purpose |
+| --- | --- | --- |
+| `CRON_JOB_TOOLS` | `list_cron_jobs`, `create_cron_job`, `update_cron_job`, `delete_cron_job` | Manage scheduled jobs for the current bot (writes through the Django ORM, no separate MCP subprocess) |
+| `WEB_SEARCH_TOOLS` | `web_search`, `fetch_and_extract` | DuckDuckGo HTML search + trafilatura-powered page extraction |
+| `PDF_GENERATOR_TOOLS` | `generate_and_send_report` | HTML → WeasyPrint PDF → Telegram document delivery |
+
+These are wired into the pipeline at two points:
+
+- [`src/services/bot_processor.py`](src/services/bot_processor.py) appends all three groups to the `tool_definitions` list passed to `ContextAssembler`, so the LLM sees them in every message-processing cycle.
+- [`src/services/tool_calling_coordinator.py`](src/services/tool_calling_coordinator.py) advertises the same groups (minus `CRON_JOB_TOOLS` when `exclude_crons=True`) to Ollama, and routes each call through `ToolExecutor.execute_default_tool` — looking up the function in `FUNCTION_NAME_TO_CALLABLE_MAP` and dispatching with the right runtime context (`bot_id` for cron tools, `telegram_client` for the PDF tool, no context for web search).
+
 
 ### 7.4 Tool Execution Flow
 
@@ -741,105 +738,77 @@ class ToolExecutor:
 - **Config:** `url`, `headers`
 - **Example:** `https://api.example.com/mcp`
 
-### 8.6 Default MCP Servers
+### 8.6 Default Tools via `mcp_tools` Registry
 
-Every bot automatically includes three default MCP servers without explicit configuration:
+Every bot automatically gets three default tool groups exposed to the LLM at every message-processing cycle:
 
-#### Time Server
+#### Cron Job Manager
 
-- **Purpose:** Provides current time and timezone information for LLM context
-- **Implementation:** `mcp_server_time` (PyPI package)
-- **Transport:** LOCAL (stdio-based)
-- **Command:** `python -m mcp_server_time`
-- **When Used:** Added to all message processing flows
-
-#### Cron Job Manager Server
-
-- **Purpose:** Allows LLM to view, create, update, and delete cron jobs
-- **Implementation:** Standalone module in [`src/cron_job/`](src/cron_job/) with FastMCP
-- **Transport:** LOCAL (stdio-based)
-- **Command:** `python -m cron_job`
-- **Database:** Shares main PostgreSQL database (via environment secrets)
-- **When Used:** Added to message processing flows; **excluded** from cron job execution to avoid loops
+- **Purpose:** Allows the LLM to view, create, update, and delete cron jobs for the active bot
+- **Implementation:** In-process tool under [`src/mcp_tools/cron_job.py`](src/mcp_tools/cron_job.py), backed directly by the Django ORM.
+- **When Used:** Always available on the `CRON_JOB_TOOLS` group; the group is dropped from the advertised tool list during cron-driven runs (`exclude_crons=True` on `run_tool_calling_loop`) so the bot cannot schedule another cron job from inside a cron-driven execution
 - **Tools Available:**
   - `list_cron_jobs(bot_id, is_active=None)`
   - `create_cron_job(bot_id, name, description, cron_expression)`
   - `update_cron_job(id, bot_id, name?, description?, cron_expression?, is_active?)`
   - `delete_cron_job(id, bot_id)`
 
-#### PDF Generator Server
+#### PDF Generator
 
-- **Purpose:** Generates PDF reports from HTML content with advanced formatting options
-- **Implementation:** Standalone module in [`src/pdf_generator/`](src/pdf_generator/) with FastMCP
-- **Transport:** LOCAL (stdio-based)
-- **Command:** `python -m pdf_generator`
-- **When Used:** Added to all message processing flows
+- **Purpose:** Generates a PDF report from HTML content and ships it to the user via Telegram
+- **Implementation:** In-process tool under [`src/mcp_tools/pdf_generator.py`](src/mcp_tools/pdf_generator.py) + helpers in [`src/utils/pdf.py`](src/utils/pdf.py) (HTML extraction via regex, WeasyPrint for PDF rendering)
+- **When Used:** Always available on the `PDF_GENERATOR_TOOLS` group; receives the active `TelegramClient` from the loop at call time so it can deliver the generated document to the right chat
 - **Tools Available:**
-  - `generate_pdf(html_content, options?)` — Convert HTML to PDF with CSS styling
+  - `generate_and_send_report(contents)` — Convert HTML to PDF and deliver as a Telegram document
 
-### 8.7 Server Instantiation
+#### Web Search
 
-Default servers are constructed via `MCPServer.get_default_mcp_servers()` (static method), which returns a dict of **temporary, in-memory** `MCPServer` instances that are not persisted to the database but reused for the duration of a single message-processing cycle.
+- **Purpose:** Lets the LLM search the live web when answering questions that depend on current information
+- **Implementation:** In-process tool under [`src/mcp_tools/web_search.py`](src/mcp_tools/web_search.py) — DuckDuckGo HTML search + `trafilatura` for article extraction, with `BeautifulSoup` for parsing
+- **Dependencies:** `requests`, `trafilatura`, `beautifulsoup4`
+- **Tools Available:**
+  - `web_search(query, max_results=20)` — Search DuckDuckGo and return numbered title / URL / snippet results
+  - `fetch_and_extract(url)` — Fetch a single URL and return its main readable content as Markdown (truncated to 3000 chars)
+
+### 8.7 Default Tool Instantiation
+
+Default tools are advertised as a flat list of OpenAI-compatible tool specs in [`src/mcp_tools/tools.py`](src/mcp_tools/tools.py):
 
 ```python
-@staticmethod
-def get_default_mcp_servers() -> dict[str, "MCPServer"]:
-    return {
-        "cron_job": MCPServer(
-            name="cron_job",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "cron_job"],
-            secrets={
-                "DB_NAME": settings.DB_NAME,
-                "DB_USER": settings.DB_USER,
-                "DB_PASSWORD": settings.DB_PASSWORD,
-                "DB_HOST": settings.DB_HOST,
-            },
-        ),
-        "time": MCPServer(
-            name="time",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "mcp_server_time"],
-        ),
-        "pdf_generator": MCPServer(
-            name="pdf_generator",
-            transport=MCPTransportType.LOCAL.value[0],
-            command="python",
-            args=["-m", "pdf_generator"],
-            secrets={
-                "DB_NAME": settings.DB_NAME,
-                "DB_USER": settings.DB_USER,
-                "DB_PASSWORD": settings.DB_PASSWORD,
-                "DB_HOST": settings.DB_HOST,
-                "SECRET_KEY": settings.SECRET_KEY,
-            },
-        ),
-    }
+# src/mcp_tools/tools.py
+CRON_JOB_TOOLS      = [...]   # list_cron_jobs, create_cron_job, update_cron_job, delete_cron_job
+WEB_SEARCH_TOOLS    = [...]   # web_search, fetch_and_extract
+PDF_GENERATOR_TOOLS = [...]   # generate_and_send_report
+
+FUNCTION_NAME_TO_CALLABLE_MAP: dict[str, Callable] = {
+    LIST_CRONS:           cron_job.list,
+    CREATE_CRON:          cron_job.create,
+    UPDATE_CRON:          cron_job.update,
+    DELETE_CRON:          cron_job.delete,
+    WEB_SEARCH:           web_search.web_search,
+    FETCH_AND_EXTRACT:    web_search.fetch_and_extract,
+    GENERATE_PDF:         pdf_generator.generate_and_send_report,
+}
 ```
 
 ---
 
-## 9. Token Budgeting System (REWRITTEN)
+## 9. Token Budgeting System
 
 The token budget system treats the context window like OS RAM. Each tier has a fixed ratio, and content is truncated in priority order when the budget is exceeded.
 
-### 9.1 Allocation Tiers (NEW)
+### 9.1 Allocation Tiers
 
 ```python
 ALLOCATION_RATIOS = {
-    "history":         0.30,  # Tier 1: recency context
-    "embeddings":      0.25,  # Tier 1: semantic memory (equal to history)
-    "tool_responses":  0.25,  # Tier 2: live data from MCP tools
-    "system_prompt":   0.10,  # Tier 3: user-authored prompt + inline skills
-    "patterns":        0.05,  # Tier 3: behavioral profile
-    "summary":         0.05,  # Tier 3: past conversation summary
+    "history":        0.40,  # Tier 1: recency context (was 0.30)
+    "embeddings":     0.30,  # Tier 1: semantic memory (was 0.25)
+    "system_prompt":  0.15,  # Tier 2: user-authored prompt + inline skills (was 0.10)
+    "patterns":       0.10,  # Tier 2: behavioral profile (was 0.05)
+    "summary":        0.05,  # Tier 2: past conversation summary (unchanged)
 }
 # Total = 1.0
 ```
-
-The previous separate `SKILLS_RESERVED_TOKENS` carve-out (5%) was removed when skills were inlined into the system prompt (see [§ 10](#10-prompts--skills-block-inline)).
 
 ### 9.2 Truncation Priority
 
@@ -849,7 +818,7 @@ From most protected to truncated first:
 2. **System prompt** — truncate from bottom (preserves opening intent)
 3. **History** — drop oldest messages first
 4. **Embeddings** — drop lowest-similarity results first
-5. **Tool responses** — truncated most aggressively (verbose, LLM-generated)
+5. **Summary** — only ever truncated at its tier boundary
 
 ### 9.3 Token Measurement Constants
 
@@ -862,9 +831,11 @@ DEFAULT_OUTPUT_RESERVATION_TOKENS: int = 512  # Used when num_predict is unset
 TOOL_DEF_AVG_TOKENS: int          = 150   # Avg MCP tool definition size
 ```
 
-### 9.4 `recommended_tool_count` (NEW)
+### 9.4 `recommended_tool_count`
 
 `TokenBudgetService.compute()` returns a `TokenBudget` Pydantic model with a `recommended_tool_count` field — the maximum number of MCP tool definitions that can safely fit in the remaining headroom after every other reservation. `BotMessageProcessor` uses this to cap the tools actually passed to the tool-calling loop, ensuring partial tool schemas never enter the truncation pool (which would cause Ollama validation errors).
+
+The capacity is derived from `(num_ctx - output_reservation - fixed_overhead) // TOOL_DEF_AVG_TOKENS`. The over-budget warning threshold also accounts for `TOOL_SAFETY_BUFFER_TOKENS` so it only fires when the *measured* tool cost truly exceeds the window.
 
 ```python
 class TokenBudget(BaseModel):
@@ -874,11 +845,10 @@ class TokenBudget(BaseModel):
     fixed_overhead_tokens: int
     usable_tokens: int
 
-    recommended_tool_count: int      # NEW — cap for tools_config[:N]
+    recommended_tool_count: int      # Cap for tools_config[:N]
 
     history_tokens: int
     embedding_chars: int
-    tool_response_chars: int
     system_prompt_chars: int
     patterns_chars: int
     summary_chars: int
@@ -890,7 +860,7 @@ class TokenBudget(BaseModel):
 
 - **Messages:** Walk backwards from newest → oldest until budget exhausted
 - **Embeddings:** Walk from highest similarity → lowest until char budget exhausted
-- **Tool responses:** Hard truncate to `tool_response_chars` with a `[...response truncated]` suffix
+- **System prompt / patterns / summary:** Hard truncate to the tier's char limit, appending an ellipsis suffix
 
 ### 9.6 Logged Diagnostics
 
@@ -907,30 +877,28 @@ The standalone `TIME_MCP_SKILL`, `CRON_JOB_SKILL`, `REPORT_GENERATION_SKILL` con
 DEFAULT_SYSTEM_PROMPT = """
 {system_prompt}
 
----
+**User's Current DateTime:** {current_dt}
 
-## Skills
-- Use the `time` tool when the user asks about dates, schedules, or relative time.
-- Use the `cron_job` tool to list / create / update / delete scheduled jobs for this bot.
-- Use the `pdf_generator` tool to convert rich HTML into a PDF report.
-...
+# Skills
 
----
+- **Scheduling (Cron Jobs):** You can create, list, update, and delete the user's scheduled tasks.
+- **Report (PDF) Generator:** You can create a report in PDF format and send it to the user directly using the `generate_and_send_report` tool.
+- **Web Search:** You can search on web to get the relevant data for answering user's query. You have two tools to do that — `web_search` and `fetch_and_extract`.
 
-## Conversation Summary (Older Context)
-{summary}
+## Overview of previous discussions between you (the assistant) and the user:
 
-Bot ID: {bot_id}
-Timezone: {timezone}
+"{summary}"
 """
 ```
+
+`{current_dt}` is sourced from `django.utils.timezone.now()` so the bot always has an accurate "now" reference for scheduling and relative-time reasoning.
 
 This change has two benefits:
 
 1. **Skills participate in normal system-prompt truncation** when context is tight, rather than occupying a fixed 5% reservation
 2. **One fewer module** to maintain — the old `services/skills_registry.py` was deleted
 
-`ContextAssembler.assemble()` calls `.format(system_prompt=..., summary=..., bot_id=..., timezone=settings.TIME_ZONE)`.
+`ContextAssembler.assemble()` calls `.format(system_prompt=..., current_dt=..., summary=...)`.
 
 ---
 
@@ -1199,31 +1167,32 @@ MARTOR_ENABLE_CONFIGS = {
 
 ---
 
-## 15. Testing Infrastructure (NEW)
+## 15. Testing Infrastructure
 
 ### 15.1 Stack
 
 - **pytest 9.x** with `pytest-django`, `pytest-mock`, `pytest-asyncio`
 - **SQLite** (in-memory) via `whimsybots.settings.test`
 - **fakeredis** for cache/Celery broker shims
-- **pgvector shim** — entire `pgvector.django` module stubbed via `unittest.mock.MagicMock` so `VectorField` imports succeed without `psycopg2` + native pgvector
+- **pgvector shim** — entire `pgvector.django` module stubbed via `unittest.mock.MagicMock` so `VectorField` imports succeed without `psycopg2` + native pgvector. A `pgvector.django.vector` sub-module stub is also installed so the generated `0002_initial.py` migration can be imported.
 - **ArrayField shim** — `django.contrib.postgres.fields.ArrayField` patched at import time to use `JSONField` on SQLite
+- **WeasyPrint stub** — installed in `whimsybots/settings/test.py` and in the root `conftest.py` so the `mcp_tools` package (now imported at app startup) doesn't blow up on CI workers without `libgobject-2.0-0`
 
 ### 15.2 Layout
 
 ```text
 src/tests/
-  conftest.py                       ← Root fixtures (DB, fakeredis, sample data)
+  conftest.py                       ← Root fixtures (DB, fakeredis, weasyprint stub)
   test_app/                         ← choices, fields, validators, models, admin, forms, tasks
   test_clients/                     ← telegram, ollama, mcp clients
-  test_cron_job/                    ← cron_job MCP server (server, db, helpers)
   test_managers/                    ← telegram_client, ollama_config managers
-  test_pdf_generator/               ← pdf_generator MCP server (server, helpers)
+  test_mcp_tools/                   ← mcp_tools/ registry, cron_job, pdf_generator, web_search
   test_services/                    ← All services (bot_processor, context_assembler,
                                      embedding, observed_patterns, telegram_update_handler,
                                      tool_calling_coordinator, tool_executor,
                                      conversation_summary, rate_limiter, token_budget)
-  test_utils/                       ← crypto, formatting, scheduling, telegram, text, tasks
+  test_utils/                       ← crypto, formatting, scheduling, telegram, text,
+                                     tasks, cron_job, pdf
   test_whimsybots/                  ← views (Telegram webhook)
 ```
 
@@ -1246,11 +1215,10 @@ python_functions = test_*
 ```makefile
 test            # pytest src/tests/
 test-verbose    # pytest src/tests/ -v
-test-coverage   # pytest src/tests/ --cov
 test-specific   # pytest src/tests/<FILE>
 ```
 
-### 15.5 Continuous Integration (NEW)
+### 15.5 Continuous Integration
 
 [`.github/workflows/master.yml`](.github/workflows/master.yml) runs the full suite on every push and PR to `master`:
 
@@ -1261,7 +1229,7 @@ test-specific   # pytest src/tests/<FILE>
 
 ---
 
-## 16. Utils Subpackage (NEW)
+## 16. Utils Subpackage
 
 Cross-cutting helpers were extracted from the old `src/app/utils.py` into a dedicated `src/utils/` subpackage so they can be imported from tasks, services, clients, and models without dragging app-level imports along.
 
@@ -1408,13 +1376,12 @@ MCP servers (time, cron_job, pdf_generator) run as stdio subprocesses spawned by
 | Cron schedule embeddings | ✅ | Auto-refreshed by `cron_job_poller` when stale |
 | MCP tools description embeddings | ✅ | Generated by `EmbeddingService.save_mcp_embedding()` |
 | Message embeddings | ✅ | Generated by `generate_embedding` task, used for relevant memory retrieval |
-| Report generation | ✅ | MCP Server-based PDF generation called directly by LLM (no separate async task) |
+| Report generation | ✅ | In-process `mcp_tools.pdf_generator` (WeasyPrint) called directly by LLM |
 | Cron job processing | ✅ | Dedicated `process_cron_job` task accepting `CronJob` instance |
-| Default MCP servers | ✅ | Time, Cron Job Manager, PDF Generator (FastMCP) — always available, not persisted |
-| Cron Job MCP Server | ✅ | Standalone module with list/create/update/delete tools |
+| In-process `mcp_tools` registry | ✅ | Cron jobs (Django ORM), PDF generator (WeasyPrint), web search (DuckDuckGo + trafilatura) — see [`src/mcp_tools/`](src/mcp_tools/) |
+| Redis-backed MCP tool-list cache | ✅ | `MCPToolsBuilder` caches tool lists per `(bot_id, server_id)` for 1 hour |
 | Multi-queue Celery | ✅ | beat + default queues |
 | Comprehensive logging | ✅ | JSON logging with `LogFormatter` |
-| Async database | ✅ | asyncpg for cron_job MCP server database access |
 | Encryption for secrets | ✅ | EncryptedCharField + EncryptedJSONField |
 | Telegram rate limiting | ✅ | Rate limit retry with exponential backoff in tasks |
 | Message splitting | ✅ | Intelligent splitting for responses > 4096 chars |
@@ -1427,10 +1394,10 @@ MCP servers (time, cron_job, pdf_generator) run as stdio subprocesses spawned by
 | Response validation | ✅ | Null/empty response checks in tasks |
 | `utils` subpackage | ✅ | `crypto`, `formatting`, `scheduling`, `tasks`, `telegram`, `text` extracted from `app/utils.py` |
 | Shared Celery helpers | ✅ | All cross-task helpers consolidated in `utils.tasks` |
-| **Test suite** | ✅ | Full pytest suite across app / clients / cron_job / managers / pdf_generator / services / utils / whimsybots |
+| **Test suite** | ✅ | Full pytest suite across app / clients / managers / mcp_tools / services / utils / whimsybots (637+ tests) |
 | **Test infrastructure** | ✅ | `pytest.ini`, top-level `conftest.py`, SQLite + fakeredis + pgvector shims |
 | **Continuous integration** | ✅ | GitHub Actions workflow runs full pytest on push/PR to master |
-| **Make targets for tests** | ✅ | `test`, `test-verbose`, `test-coverage`, `test-specific` |
+| **Make targets for tests** | ✅ | `test`, `test-verbose`, `test-specific` |
 | Code organization | ✅ | Alphabetically organized imports across all modules |
 
 ---
@@ -1502,19 +1469,19 @@ MCP servers (time, cron_job, pdf_generator) run as stdio subprocesses spawned by
 - **Implementation:** Skills block folded into `DEFAULT_SYSTEM_PROMPT` template, formatted at assembly time with `{bot_id}` and `{timezone}`
 - **Benefit:** Skills participate in normal truncation when context is tight; one fewer module to maintain
 
-### 20.12 Semantic MCP Tool Ranking (NEW)
+### 20.12 Semantic MCP Tool Ranking
 
 - **Why:** With many MCP servers attached, offering every tool to the LLM wastes context and degrades tool selection accuracy
 - **Implementation:** `_get_tools_config(query_vector)` re-ranks bot MCPServers by cosine distance of `tools_description_embedding` to the query vector (user message embedding for inbound, `schedule_embedding` for cron runs)
 - **Result:** Tools are ordered most-relevant-first, then trimmed to `recommended_tool_count`
 
-### 20.13 Embedding Dispatch Centralization (NEW)
+### 20.13 Embedding Dispatch Centralization
 
 - **Why:** Previously `TelegramUpdateHandler` directly imported and enqueued `process_inbound_message` — a circular coupling that made the embedding pipeline non-reusable
 - **Implementation:** `generate_embedding` task now enqueues `process_inbound_message` itself; handler only triggers embedding
 - **Benefit:** Embedding pipeline is reusable for cron/MCP embeddings (sharing `utils.tasks.generate_*_embedding` helpers); handler has fewer imports
 
-### 20.14 Settings Split (NEW)
+### 20.14 Settings Split
 
 - **Why:** Monolithic `settings.py` made it impossible to run unit tests without a real Postgres + Redis
 - **Implementation:** `base.py` (production) and `test.py` (SQLite + fakeredis + pgvector shim) inherit cleanly via `from .base import *`
@@ -1527,3 +1494,17 @@ MCP servers (time, cron_job, pdf_generator) run as stdio subprocesses spawned by
   - **Removed:** Separate async task, no background processing
   - **Gained:** Instant results, simpler code, fewer moving parts
 - **Implementation:** Report generation happens via MCP tool call during message processing
+
+### 20.16 In-Process `mcp_tools` Registry
+
+- **Why:** The standalone FastMCP servers (`src/cron_job/`, `src/pdf_generator/`) required a separate Python process per server, an extra `asyncpg` SQLAlchemy stack, a duplicate ORM model, and per-request MCP transport overhead. They were also a constant source of friction (DB schema drift between Django + SQLAlchemy, separate deployable units, hard-to-test subprocess behaviour).
+- **Implementation:** `src/mcp_tools/` exposes the cron / PDF / web search tools as plain Python callables, dispatched by `ToolExecutor.execute_default_tool` via a `FUNCTION_NAME_TO_CALLABLE_MAP`. The orchestrator advertises three tool groups (`CRON_JOB_TOOLS`, `WEB_SEARCH_TOOLS`, `PDF_GENERATOR_TOOLS`) to the LLM at every cycle.
+- **Benefits:** No MCP subprocess, no duplicate ORM, no asyncpg dependency for the default tools; new defaults (e.g. web search) are just another module in the registry. Bot-specific MCP servers still go through the full remote/local MCP transport — the refactor only collapsed the built-in defaults.
+- **Trade-off:** All default tools now run inside the worker process. If one of them blocks (e.g. a slow WeasyPrint render), it blocks the worker. We accept this because the previous async design was already fire-and-forget and the volume of these calls is small.
+
+### 20.17 Redis-Backed MCP Tool-List Cache
+
+- **Why:** Calling `mcp_client.list_tools()` on every inbound message re-queries the (possibly remote) MCP server for every bot, on every request.
+- **Implementation:** `MCPToolsBuilder.build_tools_from_servers(bot_id, mcp_servers)` checks `django.core.cache` for a cached list under the key `"{bot_id}-{server.id}"` and falls through to the live client only on a miss. Cached entries use `MCP_TOOL_LIST_CACHE_TIMEOUT = 3600` (1 hour).
+- **Benefits:** Repeat requests to the same bot skip the tool discovery round-trip entirely. The cache is scoped per `(bot, server)` so two bots pointing at the same MCP server still get independent lists.
+- **`OllamaConfigManager` was tightened in the same commit** — it now calls `refresh_from_db()` on the cached row on every access so operators see the latest persisted Ollama settings without restarting workers.
