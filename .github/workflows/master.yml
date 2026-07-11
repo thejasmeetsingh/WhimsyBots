@@ -57,4 +57,4 @@ jobs:
 
       - name: Lint
         working-directory: src
-        run: ruff check src/ || true
+        run: ruff check --config src/pyproject.toml src/ || true
