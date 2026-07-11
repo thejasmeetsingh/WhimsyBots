@@ -1,6 +1,8 @@
-"""PDF Generator MCP Server Module, Which primarily does:
-- HTML to PDF conversion using WeasyPrint.
-- Direct Telegram document delivery.
+"""PDF Generator MCP Server Module.
+
+Which primarily does:
+    - HTML to PDF conversion using WeasyPrint.
+    - Direct Telegram document delivery.
 
 Example Usage:
     # User asks: "Can you provide me a detail document regarding 'X'"

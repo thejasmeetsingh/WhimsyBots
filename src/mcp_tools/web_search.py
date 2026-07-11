@@ -22,7 +22,8 @@ CONTENT_CHAR_LIMIT = 3000
 DEFAULT_TIMEOUT = 10
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
+    "Chrome/124.0 Safari/537.36"
 }
 
 
@@ -39,9 +40,17 @@ def unwrap_ddg_url(href: str) -> str:
 
 
 def web_search(query: str, max_results: int = 20) -> str:
-    """Search the web via DuckDuckGo and return a list of results with title, URL,
-    and a short snippet for each. Does NOT fetch full page content — use
-    fetch_and_extract on a specific URL from these results if you need more detail.
+    """Search the web via DuckDuckGo.
+
+    Args:
+        query (str): Search query
+        max_results (int): max results to fetch, Default is 20
+
+    Returns:
+        a list of results with title, URL, and a short snippet for each.
+
+    Does NOT fetch full page content,
+    Use 'fetch_and_extract' on a specific URL from these results if you need more detail.
     """
     max_results = min(max_results, MAX_SEARCH_RESULTS)
 
@@ -76,9 +85,15 @@ def web_search(query: str, max_results: int = 20) -> str:
 
 
 def fetch_and_extract(url: str) -> str:
-    """Fetch a specific URL and extract its main readable content as markdown,
-    stripping navigation, ads, and boilerplate. Use this after web_search when a
-    result's snippet looks worth reading in full.
+    """Fetch a specific URL and extract its main readable content as markdown.
+
+    Args:
+        url (str): URL to extract content from
+
+    Returns:
+        Webpage contents in markdown format stripping navigation, ads, and boilerplate.
+
+    Use this after 'web_search' when a result's snippet looks worth reading in full.
     """
     try:
         resp = requests.get(url, timeout=DEFAULT_TIMEOUT, headers=HEADERS)

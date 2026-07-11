@@ -35,4 +35,7 @@ CRON_ACTION_SUCCESS = "## ✅ Cron Job {action} Successfully!"
 CRON_DOES_NOT_EXISTS = "No Cron Job exists with the provided id: `{id}`"
 PDF_GENERATION_SEND_SUCCESS = "PDF generated and sent to the user successfully ✅"
 EMPTY_WEB_SEARCH = "No results found for query: `{query}`"
-WEBPAGE_CONTENT_ERROR = "Fetched {url} successfully, but couldn't extract readable article content (page may be JS-rendered, a PDF, or non-article content)."
+WEBPAGE_CONTENT_ERROR = (
+    "Fetched {url} successfully, but couldn't extract readable article content "
+    "(page may be JS-rendered, a PDF, or non-article content)."
+)

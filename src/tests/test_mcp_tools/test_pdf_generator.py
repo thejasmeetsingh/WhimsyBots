@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from mcp_tools import pdf_generator
 from strings import PDF_GENERATION_SEND_SUCCESS
 
@@ -90,6 +92,3 @@ def test_propagates_pdf_generation_errors():
         with pytest.raises(RuntimeError):
             pdf_generator.generate_and_send_report(client=client, contents="<html></html>")
     client.send_document.assert_not_called()
-
-
-import pytest

@@ -37,7 +37,9 @@ CRON_JOB_TOOLS = [
         "type": "function",
         "function": {
             "name": LIST_CRONS,
-            "description": "Retrieves all cron jobs associated with a bot, optionally filtered by active status. Before performing any 'update' or 'delete' operations, Fetch the cron job list to get the accurate cron job `id`",
+            "description": "Retrieves all cron jobs associated with a bot, optionally filtered by "
+            "active status. Before performing any 'update' or 'delete' operations, Fetch the cron "
+            "job list to get the accurate cron job `id`",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -61,15 +63,21 @@ CRON_JOB_TOOLS = [
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Human-readable label for the job (max 100 chars) Examples: 'Daily Report', 'Weekly Newsletter', 'Hourly Check'. Ensure the it contain no mention of the schedule or that its a cron job.",
+                        "description": "Human-readable label for the job (max 100 chars) Examples: "
+                        "'Daily Report', 'Weekly Newsletter', 'Hourly Check'. Ensure the it "
+                        "contain no mention of the schedule or that its a cron job.",
                     },
                     "description": {
                         "type": "string",
-                        "description": "Detailed description of what the job does (max 5000 chars) Examples: 'Generates and sends daily performance report', 'Fetches latest data from API'. Ensure the it contain no mention of the schedule or that its a cron job.",
+                        "description": "Detailed description of what the job does (max 5000 chars) "
+                        "Examples: 'Generates and sends daily performance report', 'Fetches latest "
+                        "data from API'. Ensure the it contain no mention of the schedule or that "
+                        "its a cron job.",
                     },
                     "cron_expression": {
                         "type": "string",
-                        "description": "Use standard 5-field cron expressions (minute hour day month weekday) Examples:"
+                        "description": "Use standard 5-field cron expressions (minute hour day "
+                        "month weekday) Examples:"
                         "- daily 9 AM → '0 9 * * *'"
                         "- weekdays → '0 9 * * 1-5'"
                         "- weekly Sunday → '0 10 * * 0'",
@@ -83,7 +91,8 @@ CRON_JOB_TOOLS = [
         "type": "function",
         "function": {
             "name": UPDATE_CRON,
-            "description": "Updates one or more fields of an existing cron job. Only the provided fields will be updated; other fields remain unchanged.",
+            "description": "Updates one or more fields of an existing cron job. Only the provided "
+            "fields will be updated; other fields remain unchanged.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -93,15 +102,22 @@ CRON_JOB_TOOLS = [
                     },
                     "name": {
                         "type": "string",
-                        "description": "(Optional) Human-readable label for the job (max 100 chars) Examples: 'Daily Report', 'Weekly Newsletter', 'Hourly Check'. Ensure the it contain no mention of the schedule or that its a cron job.",
+                        "description": "(Optional) Human-readable label for the job (max 100 "
+                        "chars) Examples: 'Daily Report', 'Weekly Newsletter', 'Hourly "
+                        "Check'. Ensure the it contain no mention of the schedule or that its a "
+                        "cron job.",
                     },
                     "description": {
                         "type": "string",
-                        "description": "(Optional) Detailed description of what the job does (max 5000 chars) Examples: 'Generates and sends daily performance report', 'Fetches latest data from API'. Ensure the it contain no mention of the schedule or that its a cron job.",
+                        "description": "(Optional) Detailed description of what the job does (max "
+                        "5000 chars) Examples: 'Generates and sends daily performance report', "
+                        "'Fetches latest data from API'. Ensure the it contain no mention of the "
+                        "schedule or that its a cron job.",
                     },
                     "cron_expression": {
                         "type": "string",
-                        "description": "(Optional) Use standard 5-field cron expressions (minute hour day month weekday) Examples:"
+                        "description": "(Optional) Use standard 5-field cron expressions (minute "
+                        "hour day month weekday) Examples:"
                         "- daily 9 AM → '0 9 * * *'"
                         "- weekdays → '0 9 * * 1-5'"
                         "- weekly Sunday → '0 10 * * 0'",
@@ -139,7 +155,8 @@ WEB_SEARCH_TOOLS = [
         "type": "function",
         "function": {
             "name": WEB_SEARCH,
-            "description": "Search the web via DuckDuckGo, Does NOT fetch full page content — use 'fetch_and_extract' on a specific URL from these results if you need more detail.",
+            "description": "Search the web via DuckDuckGo, Does NOT fetch full page content — "
+            "use 'fetch_and_extract' on a specific URL from these results if you need more detail.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -156,7 +173,9 @@ WEB_SEARCH_TOOLS = [
         "type": "function",
         "function": {
             "name": FETCH_AND_EXTRACT,
-            "description": "Fetch a specific URL and extract its main readable content as markdown. Use this after 'web_search' when a result's snippet looks worth reading in full",
+            "description": "Fetch a specific URL and extract its main readable content as "
+            "markdown. Use this after 'web_search' when a result's snippet looks worth reading in "
+            "full",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -182,9 +201,11 @@ PDF_GENERATOR_TOOLS = [
                 "properties": {
                     "contents": {
                         "type": "string",
-                        "description": "HTML markup to be converted to PDF. Must contain valid HTML structure; plain text will be rejected."
+                        "description": "HTML markup to be converted to PDF. Must contain valid "
+                        "HTML structure; plain text will be rejected."
                         "- No markdown and no text outside the HTML."
-                        "- All CSS must be inline or in a single `<style>` block in `<head>`. No external stylesheets."
+                        "- All CSS must be inline or in a single `<style>` block in `<head>`. No "
+                        "external stylesheets."
                         "- No JavaScript — WeasyPrint does not execute scripts."
                         "- No flexbox or CSS Grid — use block elements and tables for layout."
                         "- No emojis — they will not render."
