@@ -181,7 +181,7 @@ WhimsyBots/
                               pytest-asyncio, fakeredis, pgvector)
   docker-compose.yml
   Dockerfile
-  Makefile                   ← Added test, test-verbose, test-coverage, test-specific
+  Makefile                   ← Added test, test-verbose, test-specific
                               targets; env, dev-setup, install-deps, build-test
   gunicorn.conf.py           ← Gunicorn WSGI server configuration
 
@@ -1215,7 +1215,6 @@ python_functions = test_*
 ```makefile
 test            # pytest src/tests/
 test-verbose    # pytest src/tests/ -v
-test-coverage   # pytest src/tests/ --cov
 test-specific   # pytest src/tests/<FILE>
 ```
 

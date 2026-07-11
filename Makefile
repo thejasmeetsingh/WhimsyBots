@@ -1,4 +1,4 @@
-.PHONY: help build up down logs shell migrate createsuperuser collectstatic lint lint-docs format test test-verbose test-coverage test-specific clean restart stop start ps
+.PHONY: help build up down logs shell migrate createsuperuser collectstatic lint lint-docs format test test-verbose test-specific clean restart stop start ps
 
 help:
 	@echo "WhimsyBots - Available Commands"

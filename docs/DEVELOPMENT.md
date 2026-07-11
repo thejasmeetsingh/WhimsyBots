@@ -406,7 +406,6 @@ make test                    # → pytest src/tests/
 
 # Verbose / coverage / single
 make test-verbose            # → pytest src/tests/ -v
-make test-coverage           # → pytest src/tests/ --cov
 make test-specific FILE=test_app/test_models.py::TestBot::test_str
 ```
 
